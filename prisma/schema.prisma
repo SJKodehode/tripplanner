@@ -1,0 +1,163 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  schemas  = ["app"]
+}
+
+enum MemberRole {
+  OWNER
+  MEMBER
+
+  @@map("member_role")
+  @@schema("app")
+}
+
+enum PostType {
+  SUGGESTION
+  EVENT
+  PIN
+
+  @@map("post_type")
+  @@schema("app")
+}
+
+model User {
+  userId       String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid @map("user_id")
+  displayName  String        @map("display_name") @db.VarChar(120)
+  email        String?       @db.VarChar(255)
+  createdAt    DateTime      @default(now()) @map("created_at") @db.Timestamptz(0)
+  lastSeenAt   DateTime?     @map("last_seen_at") @db.Timestamptz(0)
+  createdTrips Trip[]        @relation("TripsCreatedBy")
+  tripMembers  TripMember[]
+  feedPosts    FeedPost[]    @relation("FeedPostsAuthor")
+  feedComments FeedComment[] @relation("FeedCommentsAuthor")
+  postVotes    PostVote[]
+
+  @@map("users")
+  @@schema("app")
+}
+
+model Trip {
+  tripId           String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid @map("trip_id")
+  joinCode         String       @unique(map: "uq_trips_join_code") @map("join_code") @db.Char(8)
+  tripName         String       @map("trip_name") @db.VarChar(120)
+  destinationName  String       @map("destination_name") @db.VarChar(200)
+  startDate        DateTime?    @map("start_date") @db.Date
+  dayCount         Int          @map("day_count")
+  createdByUserId  String       @map("created_by_user_id") @db.Uuid
+  createdAt        DateTime     @default(now()) @map("created_at") @db.Timestamptz(0)
+  updatedAt        DateTime     @default(now()) @map("updated_at") @db.Timestamptz(0)
+  isArchived       Boolean      @default(false) @map("is_archived")
+  createdByUser    User         @relation("TripsCreatedBy", fields: [createdByUserId], references: [userId], map: "fk_trips_created_by_user")
+  tripMembers      TripMember[]
+  tripDays         TripDay[]
+  feedPosts        FeedPost[]
+
+  @@map("trips")
+  @@schema("app")
+}
+
+model TripMember {
+  tripId     String     @map("trip_id") @db.Uuid
+  userId     String     @map("user_id") @db.Uuid
+  memberRole MemberRole @default(MEMBER) @map("member_role")
+  joinedAt   DateTime   @default(now()) @map("joined_at") @db.Timestamptz(0)
+  isActive   Boolean    @default(true) @map("is_active")
+  trip       Trip       @relation(fields: [tripId], references: [tripId], onDelete: Cascade, map: "fk_trip_members_trip")
+  user       User       @relation(fields: [userId], references: [userId], map: "fk_trip_members_user")
+
+  @@id([tripId, userId], map: "pk_trip_members")
+  @@index([userId], map: "ix_trip_members_user_id")
+  @@map("trip_members")
+  @@schema("app")
+}
+
+model TripDay {
+  tripDayId  String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid @map("trip_day_id")
+  tripId     String     @map("trip_id") @db.Uuid
+  dayNumber  Int        @map("day_number")
+  tripDate   DateTime?  @map("trip_date") @db.Date
+  label      String?    @db.VarChar(80)
+  createdAt  DateTime   @default(now()) @map("created_at") @db.Timestamptz(0)
+  trip       Trip       @relation(fields: [tripId], references: [tripId], onDelete: Cascade, map: "fk_trip_days_trip")
+  feedPosts  FeedPost[]
+
+  @@unique([tripId, dayNumber], map: "uq_trip_days_trip_id_day_number")
+  @@map("trip_days")
+  @@schema("app")
+}
+
+model FeedPost {
+  feedPostId    String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid @map("feed_post_id")
+  tripId        String          @map("trip_id") @db.Uuid
+  tripDayId     String?         @map("trip_day_id") @db.Uuid
+  authorUserId  String          @map("author_user_id") @db.Uuid
+  postType      PostType        @map("post_type")
+  title         String?         @db.VarChar(200)
+  body          String?         @db.Text
+  eventName     String?         @map("event_name") @db.VarChar(200)
+  fromTime      DateTime?       @map("from_time") @db.Time(0)
+  toTime        DateTime?       @map("to_time") @db.Time(0)
+  locationName  String?         @map("location_name") @db.VarChar(200)
+  latitude      Decimal?        @db.Decimal(9, 6)
+  longitude     Decimal?        @db.Decimal(9, 6)
+  createdAt     DateTime        @default(now()) @map("created_at") @db.Timestamptz(0)
+  updatedAt     DateTime        @default(now()) @map("updated_at") @db.Timestamptz(0)
+  isDeleted     Boolean         @default(false) @map("is_deleted")
+  trip          Trip            @relation(fields: [tripId], references: [tripId], onDelete: Cascade, map: "fk_feed_posts_trip")
+  tripDay       TripDay?        @relation(fields: [tripDayId], references: [tripDayId], map: "fk_feed_posts_trip_day")
+  author        User            @relation("FeedPostsAuthor", fields: [authorUserId], references: [userId], map: "fk_feed_posts_author")
+  feedComments  FeedComment[]
+  postVotes     PostVote[]
+  feedPostImages FeedPostImage[]
+
+  @@index([tripId, createdAt(sort: Desc)], map: "ix_feed_posts_trip_id_created_at")
+  @@index([tripDayId, createdAt(sort: Desc)], map: "ix_feed_posts_trip_day_id_created_at")
+  @@map("feed_posts")
+  @@schema("app")
+}
+
+model FeedComment {
+  feedCommentId String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid @map("feed_comment_id")
+  feedPostId    String    @map("feed_post_id") @db.Uuid
+  authorUserId  String    @map("author_user_id") @db.Uuid
+  commentBody   String    @map("comment_body") @db.VarChar(2000)
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz(0)
+  updatedAt     DateTime  @default(now()) @map("updated_at") @db.Timestamptz(0)
+  isDeleted     Boolean   @default(false) @map("is_deleted")
+  feedPost      FeedPost  @relation(fields: [feedPostId], references: [feedPostId], onDelete: Cascade, map: "fk_feed_comments_post")
+  author        User      @relation("FeedCommentsAuthor", fields: [authorUserId], references: [userId], map: "fk_feed_comments_author")
+
+  @@index([feedPostId, createdAt(sort: Desc)], map: "ix_feed_comments_feed_post_id_created_at")
+  @@map("feed_comments")
+  @@schema("app")
+}
+
+model PostVote {
+  feedPostId String    @map("feed_post_id") @db.Uuid
+  userId     String    @map("user_id") @db.Uuid
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz(0)
+  feedPost   FeedPost  @relation(fields: [feedPostId], references: [feedPostId], onDelete: Cascade, map: "fk_post_votes_post")
+  user       User      @relation(fields: [userId], references: [userId], map: "fk_post_votes_user")
+
+  @@id([feedPostId, userId], map: "pk_post_votes")
+  @@index([userId], map: "ix_post_votes_user_id")
+  @@map("post_votes")
+  @@schema("app")
+}
+
+model FeedPostImage {
+  postImageId String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid @map("post_image_id")
+  feedPostId  String    @map("feed_post_id") @db.Uuid
+  imageUrl    String    @map("image_url") @db.VarChar(500)
+  sortOrder   Int       @default(0) @map("sort_order")
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(0)
+  feedPost    FeedPost  @relation(fields: [feedPostId], references: [feedPostId], onDelete: Cascade, map: "fk_feed_post_images_post")
+
+  @@index([feedPostId, sortOrder, createdAt], map: "ix_feed_post_images_feed_post_id_sort_order")
+  @@map("feed_post_images")
+  @@schema("app")
+}
