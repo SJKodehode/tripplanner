@@ -9,6 +9,6 @@ export default defineConfig({
     react(),
   ],
   preview: {
-    allowedHosts: ['deternoemeddet.one', 'www.deternoemeddet.one'],
+    allowedHosts: ['deternoemeddet.one', 'www.deternoemeddet.one', 'deternoemeddet.no', 'www.deternoemeddet.no'],
   },
 })
