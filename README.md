@@ -108,10 +108,19 @@ GitHub repo secrets required:
 - `DEPLOY_PORT` (usually `22`)
 - `DEPLOY_PATH` (remote path, for example `/var/www/tripplanner`)
 - `DEPLOY_SSH_PRIVATE_KEY` (private key that matches your server authorized key)
-- `DEPLOY_ENV_FILE` (full `.env` file content)
+
+Server-managed environment file:
+
+```bash
+sudo mkdir -p /etc/tripplanner
+sudo nano /etc/tripplanner/backend.env
+sudo chown <server-user>:<server-user> /etc/tripplanner/backend.env
+sudo chmod 600 /etc/tripplanner/backend.env
+ln -sfn /etc/tripplanner/backend.env /var/www/tripplanner/.env
+```
 
 Push to `main` to deploy automatically.
-The workflow syncs files, writes `.env`, runs Prisma migrations, builds frontend, and reloads PM2.
+The workflow syncs files, runs Prisma migrations, builds frontend, and reloads PM2.
 
 Useful server commands:
 

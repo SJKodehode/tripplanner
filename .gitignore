@@ -13,6 +13,7 @@ dist-ssr
 server/uploads/
 *.local
 .env
+backend.env
 !.env.example
 
 # Editor directories and files
