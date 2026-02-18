@@ -1,0 +1,144 @@
+@import "tailwindcss";
+@import "@heroui/styles"; 
+/*
+ * HeroUI Theme Customization
+ * Add this to your global.css after importing @heroui/styles
+ * Only includes base variables from variables.css
+ * @see https://v3.heroui.com/docs/react/getting-started/theming
+ */
+
+:root,
+.light,
+.default,
+[data-theme="light"],
+[data-theme="default"] {
+  /* Theme Colors (Light Mode) */
+  --accent: oklch(63.18% 0.1560 154.38);
+  --accent-foreground: oklch(99.11% 0 0);
+  --background: oklch(96.81% 0.0105 133.24);
+  --border: oklch(86.42% 0.0172 117.92);
+  --danger: oklch(65.32% 0.2335 25.74);
+  --danger-foreground: oklch(99.11% 0 0);
+  --default: oklch(93.89% 0.0157 131.18);
+  --default-foreground: oklch(25.72% 0.0245 141.64);
+  --field-background: oklch(100.00% 0.0008 253.83);
+  --field-foreground: oklch(25.72% 0.0245 141.64);
+  --field-placeholder: oklch(53.71% 0.0247 141.35);
+  --focus: oklch(63.18% 0.1560 154.38);
+  --foreground: oklch(25.72% 0.0245 141.64);
+  --muted: oklch(53.71% 0.0247 141.35);
+  --overlay: oklch(100.00% 0.0004 253.83);
+  --overlay-foreground: oklch(25.72% 0.0245 141.64);
+  --scrollbar: oklch(87.10% 0.0015 253.83);
+  --segment: oklch(100.00% 0.0015 253.83);
+  --segment-foreground: oklch(25.72% 0.0245 141.64);
+  --separator: oklch(92.00% 0.0015 253.83);
+  --success: oklch(73.29% 0.1941 150.81);
+  --success-foreground: oklch(24.68% 0.0240 149.16);
+  --surface: oklch(100.00% 0.0008 253.83);
+  --surface-foreground: oklch(25.72% 0.0245 141.64);
+  --surface-secondary: oklch(95.31% 0.0094 126.56);
+  --surface-secondary-foreground: oklch(25.72% 0.0245 141.64);
+  --surface-tertiary: oklch(92.72% 0.0138 122.97);
+  --surface-tertiary-foreground: oklch(25.72% 0.0245 141.64);
+  --warning: oklch(78.19% 0.1590 72.33);
+  --warning-foreground: oklch(21.03% 0.0059 72.33);
+
+  /* Border Radius */
+  --radius: 0.5rem;
+  --field-radius: 0.75rem;
+
+  /* Font Family */
+  --font-sans: "Avenir Next", "Segoe UI", "Trebuchet MS", sans-serif;
+}
+
+.dark,
+[data-theme="dark"] {
+  color-scheme: dark;
+  /* Theme Colors (Dark Mode) */
+  --accent: oklch(62.04% 0.1950 253.83);
+  --accent-foreground: oklch(99.11% 0 0);
+  --background: oklch(12.00% 0.0015 253.83);
+  --border: oklch(28.00% 0.0015 253.83);
+  --danger: oklch(59.40% 0.1973 24.63);
+  --danger-foreground: oklch(99.11% 0 0);
+  --default: oklch(27.40% 0.0015 253.83);
+  --default-foreground: oklch(99.11% 0 0);
+  --field-background: oklch(21.03% 0.0030 253.83);
+  --field-foreground: oklch(99.11% 0.0015 253.83);
+  --field-placeholder: oklch(70.50% 0.0030 253.83);
+  --focus: oklch(62.04% 0.1950 253.83);
+  --foreground: oklch(99.11% 0.0015 253.83);
+  --muted: oklch(70.50% 0.0030 253.83);
+  --overlay: oklch(21.03% 0.0030 253.83);
+  --overlay-foreground: oklch(99.11% 0.0015 253.83);
+  --scrollbar: oklch(70.50% 0.0015 253.83);
+  --segment: oklch(39.64% 0.0015 253.83);
+  --segment-foreground: oklch(99.11% 0.0015 253.83);
+  --separator: oklch(25.00% 0.0015 253.83);
+  --success: oklch(73.29% 0.1941 150.81);
+  --success-foreground: oklch(21.03% 0.0059 150.81);
+  --surface: oklch(21.03% 0.0030 253.83);
+  --surface-foreground: oklch(99.11% 0.0015 253.83);
+  --surface-secondary: oklch(25.70% 0.0023 253.83);
+  --surface-secondary-foreground: oklch(99.11% 0.0015 253.83);
+  --surface-tertiary: oklch(27.21% 0.0023 253.83);
+  --surface-tertiary-foreground: oklch(99.11% 0.0015 253.83);
+  --warning: oklch(82.03% 0.1392 76.34);
+  --warning-foreground: oklch(21.03% 0.0059 76.34);
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  color: var(--foreground);
+  font-family: var(--font-sans);
+  background-color: var(--background);
+  background-image:
+    linear-gradient(120deg, color-mix(in oklch, var(--accent) 10%, transparent), transparent 40%),
+    radial-gradient(circle at 20% 20%, color-mix(in oklch, var(--warning) 16%, transparent), transparent 45%);
+  background-repeat: no-repeat;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+.trip-headline {
+  font-family: "Palatino Linotype", "Book Antiqua", "Times New Roman", serif;
+  letter-spacing: 0.02em;
+}
+
+.fade-in {
+  animation: fade-in 300ms ease-out both;
+}
+
+.slide-up {
+  animation: slide-up 360ms ease-out both;
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes slide-up {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
