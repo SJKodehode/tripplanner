@@ -1270,7 +1270,7 @@ export default function App() {
                                       {post.body && <p className="text-sm leading-6">{post.body}</p>}
 
                                       {post.images.length > 0 && (
-                                        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                                        <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
                                           {post.images.map((imageUrl, index) => (
                                             <a
                                               key={`${post.id}-image-${index}`}
