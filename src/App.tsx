@@ -1286,12 +1286,12 @@ export default function App() {
                                             <span className="flex h-5 w-5 items-center justify-center rounded-full bg-accent/20 text-[10px] font-semibold text-accent">
                                               {getDisplayInitial(post.voterDisplayNames[0])}
                                             </span>
-                                            <span className="max-w-[180px] truncate text-xs text-muted">
+                                            <span className="max-w-[180px] truncate text-sm text-muted">
                                               {formatVoterNames(post.voterDisplayNames)}
                                             </span>
                                           </div>
                                         )}
-                                        <span className="text-xs text-muted"> Tenker det er noe med det{post.voteCount === 1 ? '' : ''}</span>
+                                        <span className="text-sm text-muted -ml-0.5"> Tenker det er noe med det{post.voteCount === 1 ? '' : ''}</span>
                                         <Button
                                           className={post.hasVoted ? 'bg-accent text-accent-foreground' : ''}
                                           isDisabled={post.hasVoted || votingPostId === post.id}
