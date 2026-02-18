@@ -843,7 +843,7 @@ export default function App() {
 
   if (isAuthLoading) {
     return (
-      <div className="flex min-h-screen items-center justify-center px-6">
+      <div className="flex min-h-screen items-center justify-center px-4">
         <Card className="w-full max-w-md border border-border/70 bg-surface/95">
           <Card.Content className="py-8 text-center text-muted">Checking login session...</Card.Content>
         </Card>
@@ -853,7 +853,7 @@ export default function App() {
 
   if (!isAuthenticated) {
     return (
-      <div className="flex min-h-screen items-center justify-center px-6">
+      <div className="flex min-h-screen items-center justify-center px-4">
         <Card className="w-full max-w-md border border-border/70 bg-surface/95">
           <Card.Header>
             <Card.Title className="trip-headline text-2xl">Dublin Crew Planner</Card.Title>
@@ -991,31 +991,30 @@ export default function App() {
             {trip && (
               <>
                 <Card className="border border-border/70 bg-surface/95">
-                  <Card.Content className="flex flex-col gap-4 py-5 md:flex-row md:items-center md:justify-between">
+                  <Card.Content className="flex flex-col gap-4  justify-end-safe md:flex-row md:items-center-safe md:justify-between">
                     <div className="flex flex-wrap items-center gap-2">
-                      <Chip>{trip.tripName}</Chip>
-                      <Chip>{trip.destinationName}</Chip>
-                      <Chip>{trip.dayCount} Days</Chip>
+                      <Chip size='lg'>Group: {trip.tripName}</Chip>
+                      <Chip size='lg'>Destination: {trip.destinationName}</Chip>
                       {tripDateRange && (
-                        <Chip>
-                          {formatDateLong(tripDateRange.startDate)} to {formatDateLong(tripDateRange.endDate)}
+                        <Chip size='lg'>
+                          {formatDateLong(tripDateRange.startDate)} - {formatDateLong(tripDateRange.endDate)}
                         </Chip>
                       )}
-                      <Chip>Join Code {trip.joinCode}</Chip>
+                      <Chip size='lg'>Join Code {trip.joinCode}</Chip>
                     </div>
 
-                    <div className="flex flex-wrap gap-2">
-                      <Button onPress={() => entryModal.open()}>Trip Options</Button>
-                      <Button className="bg-danger text-danger-foreground" onPress={() => tripDeleteModal.open()}>
-                        Delete Trip
-                      </Button>
-                      <Button
+                    <div className="flex flex-nowrap gap-2 items-end-safe ">
+                      <Button className={'w-full'}
                         onPress={() => {
                           setView('setup')
                           setSetupError('')
                         }}
                       >
-                        Create New Trip
+                        New Trip
+                      </Button>
+                      <Button className={'w-full'} onPress={() => entryModal.open()}>Trip Options</Button>
+                      <Button  className="bg-danger w-full text-danger-foreground" onPress={() => tripDeleteModal.open()}>
+                        Delete Trip
                       </Button>
                     </div>
                   </Card.Content>
@@ -1023,7 +1022,7 @@ export default function App() {
 
                 <Tabs.Root selectedKey={`day-${activeDay}`} onSelectionChange={onDayChange}>
                   <Card className="border border-border/70 bg-surface/95">
-                    <Card.Content className="p-3 sm:p-4">
+                    <Card.Content className="p-0 sm:p-4">
                       <Tabs.ListContainer>
                         <Tabs.List aria-label="Trip days">
                           {dayEntries.map((day) => (
@@ -1042,7 +1041,7 @@ export default function App() {
                   {dayEntries.map((dayEntry) => (
                     <Tabs.Panel id={`day-${dayEntry.dayNumber}`} key={`day-panel-${dayEntry.dayNumber}`}>
                       <div className="mt-4 grid gap-4 lg:grid-cols-[380px,1fr]">
-                        <Card className="h-fit border border-border/70 bg-surface/95">
+                        <Card className=" border border-border/70 bg-surface/90">
                           <Card.Header>
                             <Card.Title>Add To Day {dayEntry.dayNumber}</Card.Title>
                             <Card.Description>
@@ -1060,7 +1059,7 @@ export default function App() {
                                   className={
                                     composerType === type
                                       ? 'bg-accent text-accent-foreground'
-                                      : 'bg-surface-secondary text-surface-secondary-foreground'
+                                      : 'bg-surface-tertiary text-surface-secondary-foreground'
                                   }
                                   onPress={() => {
                                     setComposerType(type)
@@ -1073,7 +1072,7 @@ export default function App() {
                             </div>
 
                             {(composerType === 'SUGGESTION' || composerType === 'PIN') && (
-                              <Input
+                              <Input className={'border border-gray-300'}
                                 placeholder={composerType === 'SUGGESTION' ? 'Suggestion title' : 'Pin title'}
                                 value={composerTitle}
                                 onChange={(event) => setComposerTitle(event.target.value)}
@@ -1197,34 +1196,38 @@ export default function App() {
                             </Button>
                           </Card.Footer>
                         </Card>
-
-                        <Card className="border border-border/70 bg-surface/95">
-                          <Card.Header>
-                            <Card.Title>Day {dayEntry.dayNumber} Feed</Card.Title>
-                            <Card.Description>
+                        <div className='flex flex-col items-center-safe'>
+                          <span>●</span>
+                          <span>●</span>
+                          <span>●</span>
+                        </div>
+                        <Card className="border border-border/70 bg-surface/95 px-2.5">
+                          <Card.Header className='pl-2 flex flex-col gap-1'>
+                            <Card.Title className='text-lg'>Day {dayEntry.dayNumber} Feed</Card.Title>
+                            <Card.Description className='text-gray-500'>
                               {dayEntry.tripDate
                                 ? `Share plans for ${formatDateLong(dayEntry.tripDate)}.`
                                 : 'Share suggestions and comment on plans for this day.'}
                             </Card.Description>
                           </Card.Header>
 
-                          <Card.Content className="pb-6">
+                          <Card.Content className="pb-8 ">
                             {postsForSelectedDay.length === 0 ? (
-                              <div className="rounded-xl border border-dashed border-border p-8 text-center text-muted">
+                              <div className="rounded-xl border border-dashed border-border p-6 text-center text-muted">
                                 No posts yet for Day {dayEntry.dayNumber}. Start with a suggestion or event.
                               </div>
                             ) : (
-                              <ScrollShadow className="max-h-[70vh] space-y-3 pr-1">
+                              <ScrollShadow className="max-h-[70vh] space-y-3 pr-0.5 pl-0.5 pb-4 pt-2">
                                 {postsForSelectedDay.map((post) => (
-                                  <Card key={post.id} className="border border-border/60 bg-surface-secondary/70">
+                                  <Card key={post.id} className="border px-3 py-3 border-border/60 bg-surface-secondary/70">
                                     <Card.Header className="flex flex-row items-start justify-between gap-3">
                                       <div>
-                                        <Card.Title className="text-base">{post.title}</Card.Title>
-                                        <Card.Description>
+                                        <Card.Title className="text-base pl-1">{post.title}</Card.Title>
+                                        <Card.Description className='pl-1'>
                                           {post.authorName} • {formatDateTime(post.createdAt)}
                                         </Card.Description>
                                       </div>
-                                      <div className="flex items-center gap-2">
+                                      <div className="flex items-center flex-col md:flex-row gap-2">
                                         {post.voterDisplayNames.length > 0 && (
                                           <div className="flex items-center gap-1 rounded-full border border-border/70 bg-surface px-2 py-1">
                                             <span className="flex h-5 w-5 items-center justify-center rounded-full bg-accent/20 text-[10px] font-semibold text-accent">
@@ -1235,16 +1238,7 @@ export default function App() {
                                             </span>
                                           </div>
                                         )}
-                                        <span className="text-xs text-muted"> Tenker det er noe med det{post.voteCount === 1 ? '' : ''}</span>
-                                        <Button
-                                          className={post.hasVoted ? 'bg-accent text-accent-foreground' : ''}
-                                          isDisabled={post.hasVoted || votingPostId === post.id}
-                                          size="sm"
-                                          onPress={() => upvotePostById(post.id)}
-                                        >
-                                          {votingPostId === post.id ? 'Voting...' : `↑ ${post.voteCount}`}
-                                        </Button>
-                                        <Chip>{DEFAULT_POST_BY_TYPE[post.postType]}</Chip>
+
                                         {post.postType === 'EVENT' && (
                                           <Button
                                             className="bg-danger text-danger-foreground"
@@ -1257,9 +1251,9 @@ export default function App() {
                                       </div>
                                     </Card.Header>
 
-                                    <Card.Content className="space-y-3">
+                                    <Card.Content className="space-y-2 ">
                                       {post.postType === 'EVENT' && (
-                                        <div className="rounded-lg border border-border/70 bg-surface px-3 py-2 text-sm">
+                                        <div className="rounded-lg border border-border/70 bg-surface px-2 py-2 text-sm">
                                           <span className="font-medium">{post.eventName}</span>
                                           <div className="text-muted">
                                             {post.fromTime} to {post.toTime}
@@ -1268,7 +1262,7 @@ export default function App() {
                                       )}
 
                                       {post.postType === 'PIN' && (
-                                        <div className="rounded-lg border border-border/70 bg-surface px-3 py-2 text-sm">
+                                        <div className="rounded-lg border border-border/70 bg-surface px-2 py-2 text-sm">
                                           {post.locationName && <div className="font-medium">{post.locationName}</div>}
                                           {(post.latitude || post.longitude) && (
                                             <div className="text-muted">
@@ -1315,12 +1309,22 @@ export default function App() {
                                           ))}
                                         </div>
                                       )}
-
-                                      <div className="space-y-2 rounded-lg bg-surface border-gray-300 border px-3 py-3">
-                                        <p className="text-xs font-medium uppercase tracking-[0.08em] text-muted">Comments</p>
+                                      <div className='flex flex-wrap justify-end gap-2 flex-row items-center-safe'>
+                                        <span className="text-xs text-muted"> Tenker det er noe med det{post.voteCount === 1 ? '' : ''}</span>
+                                        <Button
+                                          className={post.hasVoted ? 'bg-accent text-accent-foreground' : ''}
+                                          isDisabled={post.hasVoted || votingPostId === post.id}
+                                          size="sm"
+                                          onPress={() => upvotePostById(post.id)}
+                                        >
+                                          {votingPostId === post.id ? 'Voting...' : `↑ ${post.voteCount}`}
+                                        </Button>
+                                      </div>
+                                      <div className="space-y-2 rounded-xl bg-surface border-gray-300/70 border px-2 py-3">
+                                        <p className="text-xs font-medium uppercase tracking-[0.08em] text-muted pl-1">Comments</p>
 
                                         {post.comments.length === 0 && (
-                                          <p className="text-sm text-muted">No comments yet.</p>
+                                          <p className="text-sm text-muted pl-1">No comments yet.</p>
                                         )}
 
                                         {post.comments.map((comment) => (
@@ -1333,9 +1337,10 @@ export default function App() {
                                           </div>
                                         ))}
 
-                                        <div className="flex flex-col gap-2 sm:flex-row">
+                                        <div className="flex flex-row items-center gap-2 sm:flex-row">
                                           <Input
-                                            className="flex-1"
+                                            className="flex-1 w-full border border-gray-300/60"
+                                            
                                             placeholder="Write a comment"
                                             value={commentDrafts[post.id] ?? ''}
                                             onChange={(event) =>
@@ -1345,11 +1350,16 @@ export default function App() {
                                               }))
                                             }
                                           />
-                                          <Button
+                                          <Button isIconOnly className={'bg-accent '} size='sm'
                                             isDisabled={commentSavingPostId === post.id}
                                             onPress={() => addComment(post.id)}
                                           >
-                                            {commentSavingPostId === post.id ? 'Saving...' : 'Comment'}
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 22 24" fill="currentColor" class="size-5">
+  <path d="M3.478 2.404a.75.75 0 0 0-.926.941l2.432 7.905H13.5a.75.75 0 0 1 0 1.5H4.984l-2.432 7.905a.75.75 0 0 0 .926.94 60.519 60.519 0 0 0 18.445-8.986.75.75 0 0 0 0-1.218A60.517 60.517 0 0 0 3.478 2.404Z" />
+</svg>
+
+
+
                                           </Button>
                                         </div>
                                       </div>
