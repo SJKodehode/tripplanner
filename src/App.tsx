@@ -1225,16 +1225,7 @@ export default function App() {
                                         </Card.Description>
                                       </div>
                                       <div className="flex items-center flex-col md:flex-row gap-2">
-                                        {post.voterDisplayNames.length > 0 && (
-                                          <div className="flex items-center gap-1 rounded-full border border-border/70 bg-surface px-2 py-1">
-                                            <span className="flex h-5 w-5 items-center justify-center rounded-full bg-accent/20 text-[10px] font-semibold text-accent">
-                                              {getDisplayInitial(post.voterDisplayNames[0])}
-                                            </span>
-                                            <span className="max-w-[180px] truncate text-xs text-muted">
-                                              {formatVoterNames(post.voterDisplayNames)}
-                                            </span>
-                                          </div>
-                                        )}
+
 
                                         {post.postType === 'EVENT' && (
                                           <Button
@@ -1290,6 +1281,16 @@ export default function App() {
                                         </div>
                                       )}
                                       <div className='flex flex-wrap justify-end gap-2 flex-row items-center-safe'>
+                                                                                {post.voterDisplayNames.length > 0 && (
+                                          <div className="flex items-center gap-1 rounded-full border border-border/70 bg-surface px-2 py-1">
+                                            <span className="flex h-5 w-5 items-center justify-center rounded-full bg-accent/20 text-[10px] font-semibold text-accent">
+                                              {getDisplayInitial(post.voterDisplayNames[0])}
+                                            </span>
+                                            <span className="max-w-[180px] truncate text-xs text-muted">
+                                              {formatVoterNames(post.voterDisplayNames)}
+                                            </span>
+                                          </div>
+                                        )}
                                         <span className="text-xs text-muted"> Tenker det er noe med det{post.voteCount === 1 ? '' : ''}</span>
                                         <Button
                                           className={post.hasVoted ? 'bg-accent text-accent-foreground' : ''}
