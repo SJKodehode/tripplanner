@@ -12,6 +12,7 @@ import {
 } from '@heroui/react'
 import { useAuth0 } from '@auth0/auth0-react'
 import {
+  createChallenge,
   createComment,
   createPost,
   createTrip,
@@ -21,6 +22,7 @@ import {
   joinTrip,
   setAccessTokenGetter,
   syncAuthSession as syncAuthSessionApi,
+  toggleChallenge,
   votePost,
 } from './api'
 import type { ComposerType, FeedPost, TripData, TripSummary } from './types'
@@ -42,6 +44,7 @@ const DEFAULT_POST_BY_TYPE: Record<ComposerType, string> = {
 
 const DAY_COUNT_MIN = 1
 const DAY_COUNT_MAX = 14
+const MAX_CHALLENGES_PER_POST = 3
 const AUTH0_AUDIENCE = import.meta.env.VITE_AUTH0_AUDIENCE as string | undefined
 
 function makeId(): string {
@@ -251,11 +254,18 @@ export default function App() {
   const [pendingPostDelete, setPendingPostDelete] = useState<{ id: string; title: string } | null>(null)
   const [isDeletingPost, setIsDeletingPost] = useState<boolean>(false)
   const [isDeletingTrip, setIsDeletingTrip] = useState<boolean>(false)
+  const [challengePostId, setChallengePostId] = useState<string | null>(null)
+  const [challengeDraft, setChallengeDraft] = useState<string>('')
+  const [challengeTagUserId, setChallengeTagUserId] = useState<string>('')
+  const [challengeError, setChallengeError] = useState<string>('')
+  const [isCreatingChallenge, setIsCreatingChallenge] = useState<boolean>(false)
+  const [togglingChallengeId, setTogglingChallengeId] = useState<string | null>(null)
   const composerFileInputRef = useRef<HTMLInputElement | null>(null)
 
   const entryModal = useOverlayState({ defaultOpen: true })
   const postDeleteModal = useOverlayState({ defaultOpen: false })
   const tripDeleteModal = useOverlayState({ defaultOpen: false })
+  const challengeModal = useOverlayState({ defaultOpen: false })
 
   const dayEntries = useMemo(() => {
     if (!trip) {
@@ -313,6 +323,24 @@ export default function App() {
     () => displayNameDraft.trim() !== displayName.trim(),
     [displayName, displayNameDraft],
   )
+
+  const challengeTagOptions = useMemo(() => {
+    const baseMembers = trip?.members ?? []
+    const normalizedCurrentName = displayName.trim() || 'Traveler'
+    const hasCurrentUser = baseMembers.some((member) => member.userId === userId)
+
+    if (hasCurrentUser) {
+      return baseMembers
+    }
+
+    return [
+      ...baseMembers,
+      {
+        userId,
+        displayName: normalizedCurrentName,
+      },
+    ]
+  }, [displayName, trip?.members, userId])
 
   const syncSession = useCallback(async (options?: { preferredDisplayName?: string }) => {
     if (!isAuthenticated) {
@@ -758,6 +786,119 @@ export default function App() {
       setGlobalError(getErrorMessage(error))
     } finally {
       setVotingPostId(null)
+    }
+  }
+
+  function openChallengeModal(postId: string) {
+    const existingChallenges = trip?.posts.find((post) => post.id === postId)?.challenges ?? []
+
+    if (existingChallenges.length >= MAX_CHALLENGES_PER_POST) {
+      setGlobalError(`Each post can only have ${MAX_CHALLENGES_PER_POST} challenges.`)
+      return
+    }
+
+    setChallengePostId(postId)
+    setChallengeDraft('')
+    setChallengeTagUserId('')
+    setChallengeError('')
+    challengeModal.open()
+  }
+
+  function closeChallengeModal() {
+    setChallengePostId(null)
+    setChallengeDraft('')
+    setChallengeTagUserId('')
+    setChallengeError('')
+    challengeModal.close()
+  }
+
+  async function addChallengeToPost() {
+    if (!challengePostId) {
+      return
+    }
+
+    const trimmedChallenge = challengeDraft.trim()
+
+    if (!trimmedChallenge) {
+      setChallengeError('Challenge text is required.')
+      return
+    }
+
+    const existingChallenges = trip?.posts.find((post) => post.id === challengePostId)?.challenges ?? []
+
+    if (existingChallenges.length >= MAX_CHALLENGES_PER_POST) {
+      setChallengeError(`You can only add up to ${MAX_CHALLENGES_PER_POST} challenges on this post.`)
+      return
+    }
+
+    try {
+      setIsCreatingChallenge(true)
+      setChallengeError('')
+
+      const challenge = await createChallenge(challengePostId, {
+        displayName: displayName.trim(),
+        challengeText: trimmedChallenge,
+        taggedUserId: challengeTagUserId || null,
+      })
+
+      setTrip((current) => {
+        if (!current) {
+          return null
+        }
+
+        return {
+          ...current,
+          posts: current.posts.map((post) => {
+            if (post.id !== challengePostId) {
+              return post
+            }
+
+            return {
+              ...post,
+              challenges: [...post.challenges, challenge],
+            }
+          }),
+        }
+      })
+
+      closeChallengeModal()
+    } catch (error) {
+      setChallengeError(getErrorMessage(error))
+    } finally {
+      setIsCreatingChallenge(false)
+    }
+  }
+
+  async function toggleChallengeCompletion(postId: string, challengeId: string) {
+    try {
+      setTogglingChallengeId(challengeId)
+      const updatedChallenge = await toggleChallenge(postId, challengeId)
+
+      setTrip((current) => {
+        if (!current) {
+          return null
+        }
+
+        return {
+          ...current,
+          posts: current.posts.map((post) => {
+            if (post.id !== postId) {
+              return post
+            }
+
+            return {
+              ...post,
+              challenges: post.challenges.map((challenge) => (
+                challenge.id === challengeId ? updatedChallenge : challenge
+              )),
+            }
+          }),
+        }
+      })
+    } catch (error) {
+      setGlobalError(getErrorMessage(error))
+    } finally {
+      setTogglingChallengeId(null)
     }
   }
 
@@ -1258,6 +1399,55 @@ export default function App() {
                                         </div>
                                       )}
 
+                                      <div className="space-y-2 rounded-lg border border-yellow-300/80 bg-yellow-50/75 px-3 py-2 text-sm">
+                                        <div className="flex items-center justify-between gap-2">
+                                          <p className="text-xs font-semibold uppercase tracking-[0.08em] text-yellow-900">
+                                            Challenges ({post.challenges.length}/{MAX_CHALLENGES_PER_POST})
+                                          </p>
+                                          <Button
+                                            size="sm"
+                                            isDisabled={post.challenges.length >= MAX_CHALLENGES_PER_POST}
+                                            onPress={() => openChallengeModal(post.id)}
+                                          >
+                                            Add Challenge
+                                          </Button>
+                                        </div>
+
+                                        {post.challenges.length === 0 ? (
+                                          <p className="text-xs text-yellow-900/80">No challenges yet.</p>
+                                        ) : (
+                                          <div className="space-y-2">
+                                            {post.challenges.map((challenge) => (
+                                              <label
+                                                key={challenge.id}
+                                                className="flex cursor-pointer items-start gap-2 rounded-md border border-yellow-300 bg-yellow-100/80 px-2.5 py-2"
+                                              >
+                                                <input
+                                                  className="mt-0.5"
+                                                  type="checkbox"
+                                                  checked={challenge.isCompleted}
+                                                  disabled={togglingChallengeId === challenge.id}
+                                                  onChange={() => toggleChallengeCompletion(post.id, challenge.id)}
+                                                />
+                                                <div className="min-w-0">
+                                                  <p className={challenge.isCompleted ? 'text-sm text-yellow-950/70 line-through' : 'text-sm text-yellow-950'}>
+                                                    <span className="font-semibold">{challenge.authorName}:</span> {challenge.challengeText}
+                                                  </p>
+                                                  {challenge.taggedDisplayName && (
+                                                    <p className="text-xs text-yellow-900/90">@{challenge.taggedDisplayName}</p>
+                                                  )}
+                                                  {challenge.isCompleted && challenge.completedByDisplayName && (
+                                                    <p className="text-xs text-yellow-900/80">
+                                                      Checked by {challenge.completedByDisplayName}
+                                                    </p>
+                                                  )}
+                                                </div>
+                                              </label>
+                                            ))}
+                                          </div>
+                                        )}
+                                      </div>
+
                                       {post.body && <p className="text-sm leading-6">{post.body}</p>}
 
                                       {post.images.length > 0 && (
@@ -1461,6 +1651,73 @@ export default function App() {
                 )}
                 <Button className="bg-accent text-accent-foreground" onPress={openCreateTrip}>
                   Create Trip
+                </Button>
+              </Modal.Footer>
+            </Modal.Dialog>
+          </Modal.Container>
+        </Modal.Backdrop>
+      </Modal.Root>
+
+      <Modal.Root state={challengeModal}>
+        <Modal.Trigger className="sr-only">
+          <span>Add challenge</span>
+        </Modal.Trigger>
+
+        <Modal.Backdrop isDismissable>
+          <Modal.Container placement="center">
+            <Modal.Dialog>
+              <Modal.Header>
+                <Modal.Heading>Add Challenge</Modal.Heading>
+                <Modal.CloseTrigger />
+              </Modal.Header>
+
+              <Modal.Body className="space-y-3 px-2">
+                <p className="text-sm text-muted">
+                  Add a custom challenge for this post. Max {MAX_CHALLENGES_PER_POST} challenges per post.
+                </p>
+
+                <TextArea className={'w-full'}
+                  placeholder="Write a custom challenge"
+                  value={challengeDraft}
+                  onChange={(event) => setChallengeDraft(event.target.value)}
+                  rows={3}
+                />
+
+                <div className="space-y-1">
+                  <p className="text-sm font-medium">Tag a group member (optional)</p>
+                  <select
+                    className="w-full rounded-lg border border-border/70 bg-surface px-3 py-2 text-sm"
+                    value={challengeTagUserId}
+                    onChange={(event) => setChallengeTagUserId(event.target.value)}
+                  >
+                    <option value="">No tag</option>
+                    {challengeTagOptions.map((member) => (
+                      <option key={member.userId} value={member.userId}>
+                        {member.displayName}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <p className="text-xs text-muted">
+                  {(challengePostId ? (trip?.posts.find((post) => post.id === challengePostId)?.challenges.length ?? 0) : 0)}/{MAX_CHALLENGES_PER_POST} used on this post
+                </p>
+
+                {challengeError && <p className="text-sm text-danger">{challengeError}</p>}
+              </Modal.Body>
+
+              <Modal.Footer className="flex justify-end gap-2">
+                <Button onPress={closeChallengeModal}>Cancel</Button>
+                <Button
+                  className="bg-accent text-accent-foreground"
+                  isDisabled={
+                    !challengePostId
+                    || isCreatingChallenge
+                    || (challengePostId ? (trip?.posts.find((post) => post.id === challengePostId)?.challenges.length ?? 0) : 0) >= MAX_CHALLENGES_PER_POST
+                  }
+                  onPress={addChallengeToPost}
+                >
+                  {isCreatingChallenge ? 'Adding...' : 'Add Challenge'}
                 </Button>
               </Modal.Footer>
             </Modal.Dialog>

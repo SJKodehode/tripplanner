@@ -1,4 +1,4 @@
-import type { ComposerType, FeedComment, FeedPost, TripData, TripDay, TripSummary } from './types'
+import type { ComposerType, FeedChallenge, FeedComment, FeedPost, TripData, TripDay, TripMember, TripSummary } from './types'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:3001'
 let accessTokenGetter: (() => Promise<string | null>) | null = null
@@ -40,6 +40,12 @@ interface CreateCommentInput {
   commentBody: string
 }
 
+interface CreateChallengeInput {
+  displayName: string
+  challengeText: string
+  taggedUserId: string | null
+}
+
 interface TripResponse {
   trip: TripData
   userId?: string
@@ -51,6 +57,10 @@ interface PostResponse {
 
 interface CommentResponse {
   comment: FeedComment
+}
+
+interface ChallengeResponse {
+  challenge: FeedChallenge
 }
 
 interface SuccessResponse {
@@ -242,6 +252,53 @@ function normalizeComment(raw: unknown): FeedComment {
   }
 }
 
+function normalizeMember(raw: unknown): TripMember {
+  if (!isObject(raw)) {
+    return {
+      userId: '',
+      displayName: 'Traveler',
+    }
+  }
+
+  return {
+    userId: asString(raw.userId),
+    displayName: asString(raw.displayName, 'Traveler'),
+  }
+}
+
+function normalizeChallenge(raw: unknown): FeedChallenge {
+  if (!isObject(raw)) {
+    return {
+      id: '',
+      authorName: 'Traveler',
+      challengeText: '',
+      taggedUserId: null,
+      taggedDisplayName: null,
+      isCompleted: false,
+      completedByUserId: null,
+      completedByDisplayName: null,
+      createdAt: new Date().toISOString(),
+    }
+  }
+
+  const taggedUserId = asString(raw.taggedUserId)
+  const taggedDisplayName = asString(raw.taggedDisplayName)
+  const completedByUserId = asString(raw.completedByUserId)
+  const completedByDisplayName = asString(raw.completedByDisplayName)
+
+  return {
+    id: asString(raw.id),
+    authorName: asString(raw.authorName, 'Traveler'),
+    challengeText: asString(raw.challengeText),
+    taggedUserId: taggedUserId || null,
+    taggedDisplayName: taggedDisplayName || null,
+    isCompleted: asBoolean(raw.isCompleted, false),
+    completedByUserId: completedByUserId || null,
+    completedByDisplayName: completedByDisplayName || null,
+    createdAt: asString(raw.createdAt, new Date().toISOString()),
+  }
+}
+
 function normalizePost(raw: unknown): FeedPost {
   if (!isObject(raw)) {
     return {
@@ -262,6 +319,7 @@ function normalizePost(raw: unknown): FeedPost {
       hasVoted: false,
       voterDisplayNames: [],
       images: [],
+      challenges: [],
       comments: [],
     }
   }
@@ -269,6 +327,9 @@ function normalizePost(raw: unknown): FeedPost {
   const comments = Array.isArray(raw.comments) ? raw.comments.map(normalizeComment) : []
   const images = Array.isArray(raw.images)
     ? raw.images.map((image) => normalizeImageUrl(image)).filter((image) => image.length > 0)
+    : []
+  const challenges = Array.isArray(raw.challenges)
+    ? raw.challenges.map(normalizeChallenge).filter((challenge) => challenge.id)
     : []
   const postTypeRaw = asString(raw.postType, 'SUGGESTION')
   const postType = postTypeRaw === 'EVENT' ? 'EVENT' : 'SUGGESTION'
@@ -291,6 +352,7 @@ function normalizePost(raw: unknown): FeedPost {
     hasVoted: asBoolean(raw.hasVoted, false),
     voterDisplayNames: normalizeDisplayNameList(raw.voterDisplayNames),
     images,
+    challenges,
     comments,
   }
 }
@@ -310,6 +372,9 @@ function normalizeTrip(raw: unknown): TripData {
   const dayCount = Math.max(1, asNumber(raw.dayCount, 1))
   const startDate = asString(raw.startDate) || null
   const rawDays = Array.isArray(raw.days) ? raw.days.map(normalizeDay) : []
+  const members = Array.isArray(raw.members)
+    ? raw.members.map(normalizeMember).filter((member) => member.userId)
+    : []
   const days = (rawDays.length > 0 ? rawDays : createFallbackDays(dayCount, startDate))
     .filter((day) => day.dayNumber >= 1)
     .sort((a, b) => a.dayNumber - b.dayNumber)
@@ -323,6 +388,7 @@ function normalizeTrip(raw: unknown): TripData {
     dayCount,
     createdAt: asString(raw.createdAt, new Date().toISOString()),
     days,
+    members,
     posts,
   }
 }
@@ -429,6 +495,24 @@ export async function createComment(postId: string, input: CreateCommentInput): 
   })
 
   return normalizeComment(response.comment)
+}
+
+export async function createChallenge(postId: string, input: CreateChallengeInput): Promise<FeedChallenge> {
+  const response = await request<ChallengeResponse>(`/api/posts/${postId}/challenges`, {
+    method: 'POST',
+    body: JSON.stringify(input),
+  })
+
+  return normalizeChallenge(response.challenge)
+}
+
+export async function toggleChallenge(postId: string, challengeId: string): Promise<FeedChallenge> {
+  const response = await request<ChallengeResponse>(`/api/posts/${postId}/challenges/${challengeId}/toggle`, {
+    method: 'PATCH',
+    body: JSON.stringify({}),
+  })
+
+  return normalizeChallenge(response.challenge)
 }
 
 export async function deletePost(postId: string, userId: string): Promise<void> {

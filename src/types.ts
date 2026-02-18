@@ -23,6 +23,18 @@ export interface FeedComment {
   createdAt: string
 }
 
+export interface FeedChallenge {
+  id: string
+  authorName: string
+  challengeText: string
+  taggedUserId: string | null
+  taggedDisplayName: string | null
+  isCompleted: boolean
+  completedByUserId: string | null
+  completedByDisplayName: string | null
+  createdAt: string
+}
+
 export interface FeedPost {
   id: string
   dayNumber: number
@@ -41,7 +53,13 @@ export interface FeedPost {
   hasVoted: boolean
   voterDisplayNames: string[]
   images: string[]
+  challenges: FeedChallenge[]
   comments: FeedComment[]
+}
+
+export interface TripMember {
+  userId: string
+  displayName: string
 }
 
 export interface TripData {
@@ -53,5 +71,6 @@ export interface TripData {
   dayCount: number
   createdAt: string
   days: TripDay[]
+  members: TripMember[]
   posts: FeedPost[]
 }

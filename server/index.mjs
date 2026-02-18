@@ -1,7 +1,7 @@
 import 'dotenv/config'
 import cors from 'cors'
 import express from 'express'
-import { Prisma, PrismaClient } from '@prisma/client'
+import prismaClientPackage from '@prisma/client'
 import { PrismaPg } from '@prisma/adapter-pg'
 import { Pool as PgPool } from 'pg'
 import multer from 'multer'
@@ -10,6 +10,8 @@ import { mkdir, unlink } from 'node:fs/promises'
 import { createHash, randomUUID } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
 import { createRemoteJWKSet, jwtVerify } from 'jose'
+
+const { Prisma, PrismaClient } = prismaClientPackage
 
 const app = express()
 const port = Number(process.env.API_PORT ?? 3001)
@@ -27,6 +29,7 @@ const currentDir = path.dirname(currentFilePath)
 const uploadsDir = path.resolve(currentDir, 'uploads')
 const maxPostImageCount = 6
 const maxPostImageSizeBytes = 8 * 1024 * 1024
+const maxChallengesPerPost = 3
 
 function createPrismaResources(rawDatabaseUrl) {
   const trimmed = (rawDatabaseUrl ?? '').trim()
@@ -459,6 +462,22 @@ function normalizeLongitude(value) {
 
   return parsed
 }
+
+function normalizeChallengeText(value) {
+  const trimmed = toTrimmedString(value)
+
+  if (!trimmed) {
+    throw new ApiError(400, 'Challenge text is required.')
+  }
+
+  return trimmed.slice(0, 500)
+}
+
+function normalizeOptionalUserId(value) {
+  const trimmed = toTrimmedString(value)
+  return trimmed || null
+}
+
 function getUploadedFiles(req) {
   if (!req.files || !Array.isArray(req.files)) {
     return []
@@ -755,6 +774,20 @@ function mapCommentRow(row) {
   }
 }
 
+function mapChallengeRow(row) {
+  return {
+    id: row.feedPostChallengeId,
+    authorName: toTrimmedString(row.author?.displayName) || 'Traveler',
+    challengeText: row.challengeText ?? '',
+    taggedUserId: row.taggedUserId ?? null,
+    taggedDisplayName: toTrimmedString(row.taggedUser?.displayName) || null,
+    isCompleted: Boolean(row.isCompleted),
+    completedByUserId: row.completedByUserId ?? null,
+    completedByDisplayName: toTrimmedString(row.completedByUser?.displayName) || null,
+    createdAt: serializeDate(row.createdAt),
+  }
+}
+
 function buildVoteInfo(postVotes, currentUserId = null) {
   const voterDisplayNames = []
   let hasVoted = false
@@ -800,6 +833,7 @@ function mapPostRow(row, currentUserId = null) {
     hasVoted: voteInfo.hasVoted,
     voterDisplayNames: voteInfo.voterDisplayNames,
     images: (row.feedPostImages ?? []).map((image) => image.imageUrl),
+    challenges: (row.feedPostChallenges ?? []).map(mapChallengeRow),
   }
 }
 async function getTripById(db, tripId, currentUserId = null) {
@@ -812,6 +846,19 @@ async function getTripById(db, tripId, currentUserId = null) {
       tripDays: {
         orderBy: {
           dayNumber: 'asc',
+        },
+      },
+      tripMembers: {
+        where: {
+          isActive: true,
+        },
+        include: {
+          user: {
+            select: {
+              userId: true,
+              displayName: true,
+            },
+          },
         },
       },
       feedPosts: {
@@ -865,6 +912,28 @@ async function getTripById(db, tripId, currentUserId = null) {
               { createdAt: 'asc' },
             ],
           },
+          feedPostChallenges: {
+            orderBy: {
+              createdAt: 'asc',
+            },
+            include: {
+              author: {
+                select: {
+                  displayName: true,
+                },
+              },
+              taggedUser: {
+                select: {
+                  displayName: true,
+                },
+              },
+              completedByUser: {
+                select: {
+                  displayName: true,
+                },
+              },
+            },
+          },
         },
       },
     },
@@ -887,6 +956,12 @@ async function getTripById(db, tripId, currentUserId = null) {
       label: day.label ?? `Day ${day.dayNumber}`,
       tripDate: serializeDateOnly(day.tripDate),
     })),
+    members: trip.tripMembers
+      .map((member) => ({
+        userId: member.user?.userId ?? member.userId,
+        displayName: toTrimmedString(member.user?.displayName) || 'Traveler',
+      }))
+      .sort((a, b) => a.displayName.localeCompare(b.displayName)),
     posts: trip.feedPosts.map((post) => mapPostRow(post, currentUserId)),
   }
 }
@@ -941,6 +1016,28 @@ async function getPostById(db, postId, currentUserId = null) {
           { createdAt: 'asc' },
         ],
       },
+      feedPostChallenges: {
+        orderBy: {
+          createdAt: 'asc',
+        },
+        include: {
+          author: {
+            select: {
+              displayName: true,
+            },
+          },
+          taggedUser: {
+            select: {
+              displayName: true,
+            },
+          },
+          completedByUser: {
+            select: {
+              displayName: true,
+            },
+          },
+        },
+      },
     },
   })
 
@@ -971,6 +1068,37 @@ async function getCommentById(db, commentId) {
   }
 
   return mapCommentRow(comment)
+}
+
+async function getChallengeById(db, challengeId) {
+  const challenge = await db.feedPostChallenge.findFirst({
+    where: {
+      feedPostChallengeId: challengeId,
+    },
+    include: {
+      author: {
+        select: {
+          displayName: true,
+        },
+      },
+      taggedUser: {
+        select: {
+          displayName: true,
+        },
+      },
+      completedByUser: {
+        select: {
+          displayName: true,
+        },
+      },
+    },
+  })
+
+  if (!challenge) {
+    return null
+  }
+
+  return mapChallengeRow(challenge)
 }
 
 async function createTripRecord(db, { tripName, destinationName, startDate, dayCount, userId }) {
@@ -1315,6 +1443,138 @@ app.post('/api/posts/:postId/comments', async (req, res, next) => {
   }
 })
 
+app.post('/api/posts/:postId/challenges', async (req, res, next) => {
+  try {
+    const db = await getDb()
+    const postId = req.params.postId
+    const preferredDisplayName = toTrimmedString(req.body.displayName)
+    const { userId } = await resolveAuthenticatedUser(db, req, preferredDisplayName)
+    const challengeText = normalizeChallengeText(req.body.challengeText)
+    const taggedUserId = normalizeOptionalUserId(req.body.taggedUserId)
+
+    const post = await db.feedPost.findFirst({
+      where: {
+        feedPostId: postId,
+        isDeleted: false,
+      },
+      select: {
+        tripId: true,
+      },
+    })
+
+    if (!post) {
+      throw new ApiError(404, 'Post not found.')
+    }
+
+    const member = await isTripMember(db, post.tripId, userId)
+
+    if (!member) {
+      throw new ApiError(403, 'Join this trip before adding challenges.')
+    }
+
+    if (taggedUserId) {
+      const taggedIsMember = await isTripMember(db, post.tripId, taggedUserId)
+
+      if (!taggedIsMember) {
+        throw new ApiError(400, 'Tagged user must be an active member of the trip.')
+      }
+    }
+
+    const challengeId = await db.$transaction(async (tx) => {
+      const challengeCount = await tx.feedPostChallenge.count({
+        where: {
+          feedPostId: postId,
+        },
+      })
+
+      if (challengeCount >= maxChallengesPerPost) {
+        throw new ApiError(400, `Each post can only have ${maxChallengesPerPost} challenges.`)
+      }
+
+      const created = await tx.feedPostChallenge.create({
+        data: {
+          feedPostId: postId,
+          authorUserId: userId,
+          taggedUserId,
+          challengeText,
+        },
+        select: {
+          feedPostChallengeId: true,
+        },
+      })
+
+      return created.feedPostChallengeId
+    })
+
+    const challenge = await getChallengeById(db, challengeId)
+
+    if (!challenge) {
+      throw new ApiError(500, 'Challenge was created but could not be loaded.')
+    }
+
+    res.status(201).json({ challenge })
+  } catch (error) {
+    next(error)
+  }
+})
+
+app.patch('/api/posts/:postId/challenges/:challengeId/toggle', async (req, res, next) => {
+  try {
+    const db = await getDb()
+    const postId = req.params.postId
+    const challengeId = req.params.challengeId
+    const { userId } = await resolveAuthenticatedUser(db, req)
+
+    const challengeRecord = await db.feedPostChallenge.findFirst({
+      where: {
+        feedPostChallengeId: challengeId,
+        feedPostId: postId,
+      },
+      include: {
+        feedPost: {
+          select: {
+            tripId: true,
+            isDeleted: true,
+          },
+        },
+      },
+    })
+
+    if (!challengeRecord || challengeRecord.feedPost?.isDeleted) {
+      throw new ApiError(404, 'Challenge not found.')
+    }
+
+    const member = await isTripMember(db, challengeRecord.feedPost.tripId, userId)
+
+    if (!member) {
+      throw new ApiError(403, 'Join this trip before updating challenges.')
+    }
+
+    const nextCompleted = !challengeRecord.isCompleted
+
+    await db.feedPostChallenge.update({
+      where: {
+        feedPostChallengeId: challengeId,
+      },
+      data: {
+        isCompleted: nextCompleted,
+        completedByUserId: nextCompleted ? userId : null,
+        updatedAt: new Date(),
+      },
+    })
+
+    const challenge = await getChallengeById(db, challengeId)
+
+    if (!challenge) {
+      throw new ApiError(500, 'Challenge was updated but could not be loaded.')
+    }
+
+    res.json({ challenge })
+  } catch (error) {
+    next(error)
+  }
+})
+
 app.post('/api/posts/:postId/votes', async (req, res, next) => {
   try {
     const db = await getDb()
@@ -1539,9 +1799,10 @@ async function start() {
   try {
     await prisma.postVote.count()
     await prisma.feedPostImage.count()
+    await prisma.feedPostChallenge.count()
   } catch (error) {
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2021') {
-      throw new Error('Missing tables for votes/images. Run Prisma migrations and restart the API.')
+      throw new Error('Missing tables for votes/images/challenges. Run Prisma migrations and restart the API.')
     }
 
     throw error

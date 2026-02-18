@@ -35,6 +35,9 @@ model User {
   feedPosts    FeedPost[]    @relation("FeedPostsAuthor")
   feedComments FeedComment[] @relation("FeedCommentsAuthor")
   postVotes    PostVote[]
+  authoredChallenges  FeedPostChallenge[] @relation("FeedPostChallengesAuthor")
+  taggedChallenges    FeedPostChallenge[] @relation("FeedPostChallengesTagged")
+  completedChallenges FeedPostChallenge[] @relation("FeedPostChallengesCompleted")
 
   @@map("users")
   @@schema("app")
@@ -113,10 +116,31 @@ model FeedPost {
   feedComments  FeedComment[]
   postVotes     PostVote[]
   feedPostImages FeedPostImage[]
+  feedPostChallenges FeedPostChallenge[]
 
   @@index([tripId, createdAt(sort: Desc)], map: "ix_feed_posts_trip_id_created_at")
   @@index([tripDayId, createdAt(sort: Desc)], map: "ix_feed_posts_trip_day_id_created_at")
   @@map("feed_posts")
+  @@schema("app")
+}
+
+model FeedPostChallenge {
+  feedPostChallengeId String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid @map("feed_post_challenge_id")
+  feedPostId          String   @map("feed_post_id") @db.Uuid
+  authorUserId        String   @map("author_user_id") @db.Uuid
+  taggedUserId        String?  @map("tagged_user_id") @db.Uuid
+  challengeText       String   @map("challenge_text") @db.VarChar(500)
+  isCompleted         Boolean  @default(false) @map("is_completed")
+  completedByUserId   String?  @map("completed_by_user_id") @db.Uuid
+  createdAt           DateTime @default(now()) @map("created_at") @db.Timestamptz(0)
+  updatedAt           DateTime @default(now()) @map("updated_at") @db.Timestamptz(0)
+  feedPost            FeedPost @relation(fields: [feedPostId], references: [feedPostId], onDelete: Cascade, map: "fk_feed_post_challenges_post")
+  author              User     @relation("FeedPostChallengesAuthor", fields: [authorUserId], references: [userId], map: "fk_feed_post_challenges_author")
+  taggedUser          User?    @relation("FeedPostChallengesTagged", fields: [taggedUserId], references: [userId], map: "fk_feed_post_challenges_tagged_user")
+  completedByUser     User?    @relation("FeedPostChallengesCompleted", fields: [completedByUserId], references: [userId], map: "fk_feed_post_challenges_completed_by")
+
+  @@index([feedPostId, createdAt], map: "ix_feed_post_challenges_feed_post_id_created_at")
+  @@map("feed_post_challenges")
   @@schema("app")
 }
 
