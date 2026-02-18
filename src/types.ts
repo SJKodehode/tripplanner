@@ -1,4 +1,4 @@
-export type ComposerType = 'SUGGESTION' | 'EVENT' | 'PIN'
+export type ComposerType = 'SUGGESTION' | 'EVENT'
 
 export interface TripDay {
   dayNumber: number

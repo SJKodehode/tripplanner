@@ -271,7 +271,7 @@ function normalizePost(raw: unknown): FeedPost {
     ? raw.images.map((image) => normalizeImageUrl(image)).filter((image) => image.length > 0)
     : []
   const postTypeRaw = asString(raw.postType, 'SUGGESTION')
-  const postType = postTypeRaw === 'EVENT' || postTypeRaw === 'PIN' ? postTypeRaw : 'SUGGESTION'
+  const postType = postTypeRaw === 'EVENT' ? 'EVENT' : 'SUGGESTION'
 
   return {
     id: asString(raw.id),

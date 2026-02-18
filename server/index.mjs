@@ -117,7 +117,7 @@ app.use(cors())
 app.use(express.json({ limit: '1mb' }))
 app.use('/uploads', express.static(uploadsDir))
 
-const POST_TYPES = new Set(['SUGGESTION', 'EVENT', 'PIN'])
+const POST_TYPES = new Set(['SUGGESTION', 'EVENT'])
 const imageMimeToExt = {
   'image/jpeg': '.jpg',
   'image/png': '.png',
@@ -1181,12 +1181,13 @@ app.post('/api/trips/:tripId/posts', postImageUpload.array('images', maxPostImag
       }
     }
 
-    if (postType === 'PIN') {
-      const hasLocation = locationName.length > 0
-      const hasCoordinates = latitude != null && longitude != null
+    if (postType === 'SUGGESTION' && (fromTime || toTime)) {
+      if (!fromTime || !toTime) {
+        throw new ApiError(400, 'Suggestion post needs both start and end time when scheduling.')
+      }
 
-      if (!hasLocation && !hasCoordinates) {
-        throw new ApiError(400, 'Pin post needs location name or latitude/longitude.')
+      if (fromTime >= toTime) {
+        throw new ApiError(400, 'Suggestion end time must be after start time.')
       }
     }
 

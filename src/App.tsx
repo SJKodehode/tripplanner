@@ -23,7 +23,7 @@ import {
   syncAuthSession as syncAuthSessionApi,
   votePost,
 } from './api'
-import type { ComposerType, TripData, TripSummary } from './types'
+import type { ComposerType, FeedPost, TripData, TripSummary } from './types'
 import AddressPicker from './components/AddressPicker'
 
 type AppView = 'setup' | 'dashboard'
@@ -33,12 +33,11 @@ const STORAGE_USER_ID_KEY = 'tripplanner:user-id:v1'
 const STORAGE_DISPLAY_NAME_KEY = 'tripplanner:display-name:v1'
 const STORAGE_USERNAME_KEY = 'tripplanner:username:v1'
 
-const POST_TYPES: ComposerType[] = ['SUGGESTION', 'EVENT', 'PIN']
+const POST_TYPES: ComposerType[] = ['SUGGESTION', 'EVENT']
 
 const DEFAULT_POST_BY_TYPE: Record<ComposerType, string> = {
   SUGGESTION: 'Suggestion',
   EVENT: 'Event',
-  PIN: 'Pinpoint',
 }
 
 const DAY_COUNT_MIN = 1
@@ -119,8 +118,44 @@ function addDaysToDate(dateValue: string, daysToAdd: number): string | null {
   return `${year}-${month}-${day}`
 }
 
-function formatCoordinate(value: number): string {
-  return value.toFixed(6)
+function timeToMinutes(value: string): number | null {
+  if (!/^\d{2}:\d{2}$/.test(value)) {
+    return null
+  }
+
+  const [hours, minutes] = value.split(':').map((part) => Number(part))
+
+  if (!Number.isInteger(hours) || !Number.isInteger(minutes)) {
+    return null
+  }
+
+  return hours * 60 + minutes
+}
+
+function comparePostsByScheduledTime(a: FeedPost, b: FeedPost): number {
+  const aStart = timeToMinutes(a.fromTime)
+  const bStart = timeToMinutes(b.fromTime)
+
+  if (aStart != null && bStart != null && aStart !== bStart) {
+    return aStart - bStart
+  }
+
+  if (aStart != null && bStart == null) {
+    return -1
+  }
+
+  if (aStart == null && bStart != null) {
+    return 1
+  }
+
+  const aEnd = timeToMinutes(a.toTime)
+  const bEnd = timeToMinutes(b.toTime)
+
+  if (aEnd != null && bEnd != null && aEnd !== bEnd) {
+    return aEnd - bEnd
+  }
+
+  return b.createdAt.localeCompare(a.createdAt)
 }
 
 function getDisplayInitial(value: string): string {
@@ -205,8 +240,6 @@ export default function App() {
   const [composerFromTime, setComposerFromTime] = useState<string>('')
   const [composerToTime, setComposerToTime] = useState<string>('')
   const [composerLocation, setComposerLocation] = useState<string>('')
-  const [composerLatitude, setComposerLatitude] = useState<string>('')
-  const [composerLongitude, setComposerLongitude] = useState<string>('')
   const [composerImages, setComposerImages] = useState<File[]>([])
   const [composerImageFieldVersion, setComposerImageFieldVersion] = useState<number>(0)
   const [composerError, setComposerError] = useState<string>('')
@@ -255,7 +288,7 @@ export default function App() {
 
     return trip.posts
       .filter((post) => post.dayNumber === activeDay)
-      .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+      .sort(comparePostsByScheduledTime)
   }, [activeDay, trip])
 
   const tripDateRange = useMemo(() => {
@@ -551,8 +584,6 @@ export default function App() {
     setComposerFromTime('')
     setComposerToTime('')
     setComposerLocation('')
-    setComposerLatitude('')
-    setComposerLongitude('')
     setComposerImages([])
     setComposerImageFieldVersion((current) => current + 1)
     setComposerError('')
@@ -586,12 +617,14 @@ export default function App() {
       }
     }
 
-    if (composerType === 'PIN') {
-      const hasLocation = composerLocation.trim().length > 0
-      const hasLatLng = composerLatitude.trim().length > 0 && composerLongitude.trim().length > 0
+    if (composerType === 'SUGGESTION' && (composerFromTime || composerToTime)) {
+      if (!composerFromTime || !composerToTime) {
+        setComposerError('Suggestion posts need both start time and end time when scheduling.')
+        return
+      }
 
-      if (!hasLocation && !hasLatLng) {
-        setComposerError('Pin posts need a place name or both latitude and longitude.')
+      if (composerFromTime >= composerToTime) {
+        setComposerError('Suggestion end time must be after start time.')
         return
       }
     }
@@ -623,8 +656,8 @@ export default function App() {
         fromTime: composerFromTime,
         toTime: composerToTime,
         locationName: composerLocation.trim(),
-        latitude: composerLatitude.trim(),
-        longitude: composerLongitude.trim(),
+        latitude: '',
+        longitude: '',
         images: composerImages,
       })
 
@@ -833,14 +866,6 @@ export default function App() {
     }
   }
 
-  function createMapLink(latitude: string, longitude: string, locationName: string): string {
-    if (latitude && longitude) {
-      return `https://www.google.com/maps?q=${encodeURIComponent(`${latitude},${longitude}`)}`
-    }
-
-    return `https://www.google.com/maps/search/${encodeURIComponent(locationName)}`
-  }
-
   if (isAuthLoading) {
     return (
       <div className="flex min-h-screen items-center justify-center px-4">
@@ -889,7 +914,7 @@ export default function App() {
 
               <Card.Title className="trip-headline text-2xl sm:text-3xl">Dublin Crew Planner</Card.Title>
               <Card.Description>
-                Plan day-by-day with suggestions, comments, pinpoints, and event times.
+                Plan day-by-day with suggestions, comments, and event times.
               </Card.Description>
             </div>
 
@@ -1047,7 +1072,7 @@ export default function App() {
                             <Card.Description>
                               {dayEntry.tripDate
                                 ? `Post ideas for ${formatDateLong(dayEntry.tripDate)}.`
-                                : 'Post ideas, events, and pinpoints to the feed.'}
+                                : 'Post ideas and events to the feed.'}
                             </Card.Description>
                           </Card.Header>
 
@@ -1071,23 +1096,23 @@ export default function App() {
                               ))}
                             </div>
 
-                            {(composerType === 'SUGGESTION' || composerType === 'PIN') && (
+                            {composerType === 'SUGGESTION' && (
                               <Input className={'border border-gray-300'}
-                                placeholder={composerType === 'SUGGESTION' ? 'Suggestion title' : 'Pin title'}
+                                placeholder="Suggestion title"
                                 value={composerTitle}
                                 onChange={(event) => setComposerTitle(event.target.value)}
                               />
                             )}
 
                             {composerType === 'EVENT' && (
-                              <Input
+                              <Input className={'border border-gray-300'}
                                 placeholder="Event name"
                                 value={composerEventName}
                                 onChange={(event) => setComposerEventName(event.target.value)}
                               />
                             )}
 
-                            {composerType === 'EVENT' && (
+                            {(composerType === 'EVENT' || composerType === 'SUGGESTION') && (
                               <div className="grid grid-cols-2 gap-2">
                                 <Input
                                   type="time"
@@ -1102,41 +1127,11 @@ export default function App() {
                               </div>
                             )}
 
-                            {composerType !== 'PIN' && (
-                              <AddressPicker
-                                placeholder="Location (optional)"
-                                value={composerLocation}
-                                onChange={setComposerLocation}
-                              />
-                            )}
-
-                            {composerType === 'PIN' && (
-                              <>
-                                <AddressPicker
-                                  placeholder="Place name (example: Guinness Storehouse)"
-                                  value={composerLocation}
-                                  onChange={setComposerLocation}
-                                  onSelect={(selection) => {
-                                    if (selection.lat != null && selection.lng != null) {
-                                      setComposerLatitude(formatCoordinate(selection.lat))
-                                      setComposerLongitude(formatCoordinate(selection.lng))
-                                    }
-                                  }}
-                                />
-                                <div className="grid grid-cols-2 gap-2">
-                                  <Input
-                                    placeholder="Latitude"
-                                    value={composerLatitude}
-                                    onChange={(event) => setComposerLatitude(event.target.value)}
-                                  />
-                                  <Input
-                                    placeholder="Longitude"
-                                    value={composerLongitude}
-                                    onChange={(event) => setComposerLongitude(event.target.value)}
-                                  />
-                                </div>
-                              </>
-                            )}
+                            <AddressPicker
+                              placeholder="Location (optional)"
+                              value={composerLocation}
+                              onChange={setComposerLocation}
+                            />
 
                             <div className="space-y-2">
                               <input
@@ -1196,11 +1191,12 @@ export default function App() {
                             </Button>
                           </Card.Footer>
                         </Card>
-                        <div className='flex flex-col items-center-safe'>
-                          <span>●</span>
-                          <span>●</span>
-                          <span>●</span>
-                        </div>
+                                      <div className="text-center flex flex-col text-sm text-black/70">
+                                        <span>&#9679;</span>
+                                        <span>&#9679;</span>
+                                        <span>&#9679;</span>
+
+                                      </div>
                         <Card className="border border-border/70 bg-surface/95 px-2.5">
                           <Card.Header className='pl-2 flex flex-col gap-1'>
                             <Card.Title className='text-lg'>Day {dayEntry.dayNumber} Feed</Card.Title>
@@ -1217,9 +1213,10 @@ export default function App() {
                                 No posts yet for Day {dayEntry.dayNumber}. Start with a suggestion or event.
                               </div>
                             ) : (
-                              <ScrollShadow className="max-h-[70vh] space-y-3 pr-0.5 pl-0.5 pb-4 pt-2">
-                                {postsForSelectedDay.map((post) => (
-                                  <Card key={post.id} className="border px-3 py-3 border-border/60 bg-surface-secondary/70">
+                              <ScrollShadow className="max-h-[70vh] space-y-3 pr-0.5 pl-0.5 pb-8 pt-2">
+                                {postsForSelectedDay.map((post, index) => (
+                                  <div key={post.id} className="space-y-3">
+                                    <Card className="border px-3 py-3 border-border/60 bg-surface-secondary/70">
                                     <Card.Header className="flex flex-row items-start justify-between gap-3">
                                       <div>
                                         <Card.Title className="text-base pl-1">{post.title}</Card.Title>
@@ -1252,35 +1249,18 @@ export default function App() {
                                     </Card.Header>
 
                                     <Card.Content className="space-y-2 ">
-                                      {post.postType === 'EVENT' && (
+                                      {(post.eventName || post.fromTime || post.toTime) && (
                                         <div className="rounded-lg border border-border/70 bg-surface px-2 py-2 text-sm">
-                                          <span className="font-medium">{post.eventName}</span>
-                                          <div className="text-muted">
-                                            {post.fromTime} to {post.toTime}
-                                          </div>
-                                        </div>
-                                      )}
-
-                                      {post.postType === 'PIN' && (
-                                        <div className="rounded-lg border border-border/70 bg-surface px-2 py-2 text-sm">
-                                          {post.locationName && <div className="font-medium">{post.locationName}</div>}
-                                          {(post.latitude || post.longitude) && (
+                                          {post.eventName && <span className="font-medium">{post.eventName}</span>}
+                                          {(post.fromTime || post.toTime) && (
                                             <div className="text-muted">
-                                              {post.latitude || '-'}, {post.longitude || '-'}
+                                              {post.fromTime || '--:--'} to {post.toTime || '--:--'}
                                             </div>
                                           )}
-                                          <a
-                                            className="mt-1 inline-block text-accent underline underline-offset-2"
-                                            href={createMapLink(post.latitude, post.longitude, post.locationName)}
-                                            target="_blank"
-                                            rel="noreferrer"
-                                          >
-                                            Open in Maps
-                                          </a>
                                         </div>
                                       )}
 
-                                      {post.postType !== 'PIN' && post.locationName && (
+                                      {post.locationName && (
                                         <div className="rounded-lg border border-border/70 bg-surface px-3 py-2 text-sm">
                                           <span className="font-medium">Location: </span>
                                           {post.locationName}
@@ -1364,7 +1344,14 @@ export default function App() {
                                         </div>
                                       </div>
                                     </Card.Content>
-                                  </Card>
+                                    </Card>
+                                    {index < postsForSelectedDay.length - 1 && (
+                                      <div className="text-center flex flex-col text-sm text-black/70">
+                                        <span>&#9679;</span>
+
+                                      </div>
+                                    )}
+                                  </div>
                                 ))}
                               </ScrollShadow>
                             )}
