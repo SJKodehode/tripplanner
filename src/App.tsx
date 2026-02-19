@@ -1022,7 +1022,7 @@ export default function App() {
       <div className="flex min-h-screen items-center justify-center px-4">
         <Card className="w-full max-w-md border border-border/70 bg-surface/95">
           <Card.Header>
-            <Card.Title className="trip-headline text-2xl">Dublin Crew Planner</Card.Title>
+            <Card.Title className="trip-headline text-2xl">Crew Planner</Card.Title>
             <Card.Description>Login to see trips you have joined and create new ones.</Card.Description>
           </Card.Header>
           {authError && (
@@ -1053,7 +1053,7 @@ export default function App() {
             <div className="flex flex-col gap-1">
                                               <span className="truncate flex items-center text-sm mb-2 text-muted">{username || user?.email || 'Authenticated User'}</span>
 
-              <Card.Title className="trip-headline text-2xl sm:text-3xl">Dublin Crew Planner</Card.Title>
+              <Card.Title className="trip-headline text-2xl sm:text-3xl">Crew Planner</Card.Title>
               <Card.Description>
                 Plan day-by-day with suggestions, comments, and event times.
               </Card.Description>
