@@ -777,6 +777,7 @@ function mapCommentRow(row) {
 function mapChallengeRow(row) {
   return {
     id: row.feedPostChallengeId,
+    authorUserId: row.authorUserId,
     authorName: toTrimmedString(row.author?.displayName) || 'Traveler',
     challengeText: row.challengeText ?? '',
     taggedUserId: row.taggedUserId ?? null,
@@ -826,6 +827,7 @@ function mapPostRow(row, currentUserId = null) {
     locationName: row.locationName ?? '',
     latitude: row.latitude == null ? '' : String(row.latitude),
     longitude: row.longitude == null ? '' : String(row.longitude),
+    authorUserId: row.authorUserId,
     authorName: toTrimmedString(row.author?.displayName) || 'Traveler',
     createdAt: serializeDate(row.createdAt),
     comments: (row.feedComments ?? []).map(mapCommentRow),
@@ -1570,6 +1572,49 @@ app.patch('/api/posts/:postId/challenges/:challengeId/toggle', async (req, res, 
     }
 
     res.json({ challenge })
+  } catch (error) {
+    next(error)
+  }
+})
+
+app.delete('/api/posts/:postId/challenges/:challengeId', async (req, res, next) => {
+  try {
+    const db = await getDb()
+    const postId = req.params.postId
+    const challengeId = req.params.challengeId
+    const { userId } = await resolveAuthenticatedUser(db, req)
+
+    const challengeRecord = await db.feedPostChallenge.findFirst({
+      where: {
+        feedPostChallengeId: challengeId,
+        feedPostId: postId,
+      },
+      include: {
+        feedPost: {
+          select: {
+            isDeleted: true,
+          },
+        },
+      },
+    })
+
+    if (!challengeRecord || challengeRecord.feedPost?.isDeleted) {
+      throw new ApiError(404, 'Challenge not found.')
+    }
+
+    const isAuthor = String(challengeRecord.authorUserId).toLowerCase() === userId.toLowerCase()
+
+    if (!isAuthor) {
+      throw new ApiError(403, 'Only the challenge author can delete this challenge.')
+    }
+
+    await db.feedPostChallenge.delete({
+      where: {
+        feedPostChallengeId: challengeId,
+      },
+    })
+
+    res.json({ success: true })
   } catch (error) {
     next(error)
   }

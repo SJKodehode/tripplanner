@@ -270,6 +270,7 @@ function normalizeChallenge(raw: unknown): FeedChallenge {
   if (!isObject(raw)) {
     return {
       id: '',
+      authorUserId: '',
       authorName: 'Traveler',
       challengeText: '',
       taggedUserId: null,
@@ -288,6 +289,7 @@ function normalizeChallenge(raw: unknown): FeedChallenge {
 
   return {
     id: asString(raw.id),
+    authorUserId: asString(raw.authorUserId),
     authorName: asString(raw.authorName, 'Traveler'),
     challengeText: asString(raw.challengeText),
     taggedUserId: taggedUserId || null,
@@ -313,6 +315,7 @@ function normalizePost(raw: unknown): FeedPost {
       locationName: '',
       latitude: '',
       longitude: '',
+      authorUserId: '',
       authorName: 'Traveler',
       createdAt: new Date().toISOString(),
       voteCount: 0,
@@ -346,6 +349,7 @@ function normalizePost(raw: unknown): FeedPost {
     locationName: asString(raw.locationName),
     latitude: asString(raw.latitude),
     longitude: asString(raw.longitude),
+    authorUserId: asString(raw.authorUserId),
     authorName: asString(raw.authorName, 'Traveler'),
     createdAt: asString(raw.createdAt, new Date().toISOString()),
     voteCount: Math.max(0, asNumber(raw.voteCount, 0)),
@@ -513,6 +517,13 @@ export async function toggleChallenge(postId: string, challengeId: string): Prom
   })
 
   return normalizeChallenge(response.challenge)
+}
+
+export async function deleteChallenge(postId: string, challengeId: string): Promise<void> {
+  await request<SuccessResponse>(`/api/posts/${postId}/challenges/${challengeId}`, {
+    method: 'DELETE',
+    body: JSON.stringify({}),
+  })
 }
 
 export async function deletePost(postId: string, userId: string): Promise<void> {

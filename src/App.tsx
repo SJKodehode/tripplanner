@@ -16,6 +16,7 @@ import {
   createComment,
   createPost,
   createTrip,
+  deleteChallenge,
   deletePost,
   deleteTrip,
   fetchTrip,
@@ -25,6 +26,7 @@ import {
   toggleChallenge,
   votePost,
 } from './api'
+import { TrashIcon } from '@heroicons/react/24/outline'
 import type { ComposerType, FeedPost, TripData, TripSummary } from './types'
 import AddressPicker from './components/AddressPicker'
 
@@ -257,15 +259,18 @@ export default function App() {
   const [challengePostId, setChallengePostId] = useState<string | null>(null)
   const [challengeDraft, setChallengeDraft] = useState<string>('')
   const [challengeTagUserId, setChallengeTagUserId] = useState<string>('')
+  const [pendingChallengeDelete, setPendingChallengeDelete] = useState<{ postId: string; challengeId: string; challengeText: string } | null>(null)
   const [challengeError, setChallengeError] = useState<string>('')
   const [isCreatingChallenge, setIsCreatingChallenge] = useState<boolean>(false)
   const [togglingChallengeId, setTogglingChallengeId] = useState<string | null>(null)
+  const [deletingChallengeId, setDeletingChallengeId] = useState<string | null>(null)
   const composerFileInputRef = useRef<HTMLInputElement | null>(null)
 
   const entryModal = useOverlayState({ defaultOpen: true })
   const postDeleteModal = useOverlayState({ defaultOpen: false })
   const tripDeleteModal = useOverlayState({ defaultOpen: false })
   const challengeModal = useOverlayState({ defaultOpen: false })
+  const challengeDeleteModal = useOverlayState({ defaultOpen: false })
 
   const dayEntries = useMemo(() => {
     if (!trip) {
@@ -902,6 +907,58 @@ export default function App() {
     }
   }
 
+  function openChallengeDeleteModal(postId: string, challengeId: string, challengeText: string) {
+    setPendingChallengeDelete({ postId, challengeId, challengeText })
+    challengeDeleteModal.open()
+  }
+
+  function closeChallengeDeleteModal() {
+    if (deletingChallengeId) {
+      return
+    }
+
+    setPendingChallengeDelete(null)
+    challengeDeleteModal.close()
+  }
+
+  async function confirmDeleteChallenge() {
+    if (!pendingChallengeDelete) {
+      return
+    }
+
+    try {
+      const { postId, challengeId } = pendingChallengeDelete
+      setDeletingChallengeId(challengeId)
+      await deleteChallenge(postId, challengeId)
+
+      setTrip((current) => {
+        if (!current) {
+          return null
+        }
+
+        return {
+          ...current,
+          posts: current.posts.map((post) => {
+            if (post.id !== postId) {
+              return post
+            }
+
+            return {
+              ...post,
+              challenges: post.challenges.filter((challenge) => challenge.id !== challengeId),
+            }
+          }),
+        }
+      })
+      setPendingChallengeDelete(null)
+      challengeDeleteModal.close()
+    } catch (error) {
+      setGlobalError(getErrorMessage(error))
+    } finally {
+      setDeletingChallengeId(null)
+    }
+  }
+
   async function saveDisplayName() {
     const nextName = displayNameDraft.trim()
 
@@ -1368,7 +1425,7 @@ export default function App() {
                                       <div className="flex items-center flex-col md:flex-row gap-2">
 
 
-                                        {post.postType === 'EVENT' && (
+                                        {post.authorUserId.toLowerCase() === userId.toLowerCase() && (
                                           <Button
                                             className="bg-danger text-danger-foreground"
                                             size="sm"
@@ -1418,31 +1475,46 @@ export default function App() {
                                         ) : (
                                           <div className="space-y-2">
                                             {post.challenges.map((challenge) => (
-                                              <label
+                                              <div
                                                 key={challenge.id}
-                                                className="flex cursor-pointer items-start gap-2 rounded-md border border-yellow-300 bg-yellow-100/80 px-2.5 py-2"
+                                                className="flex items-start justify-between gap-2 rounded-md border border-yellow-300 bg-yellow-100/80 px-2.5 py-2"
                                               >
-                                                <input
-                                                  className="mt-0.5"
-                                                  type="checkbox"
-                                                  checked={challenge.isCompleted}
-                                                  disabled={togglingChallengeId === challenge.id}
-                                                  onChange={() => toggleChallengeCompletion(post.id, challenge.id)}
-                                                />
-                                                <div className="min-w-0">
-                                                  <p className={challenge.isCompleted ? 'text-sm text-yellow-950/70 line-through' : 'text-sm text-yellow-950'}>
-                                                    <span className="font-semibold">{challenge.authorName}:</span> {challenge.challengeText}
-                                                  </p>
-                                                  {challenge.taggedDisplayName && (
-                                                    <p className="text-xs text-yellow-900/90">@{challenge.taggedDisplayName}</p>
-                                                  )}
-                                                  {challenge.isCompleted && challenge.completedByDisplayName && (
-                                                    <p className="text-xs text-yellow-900/80">
-                                                      Checked by {challenge.completedByDisplayName}
+                                                <div className="flex min-w-0 items-start gap-2">
+                                                  
+                                                  <input
+                                                    className="mt-0.5"
+                                                    type="checkbox"
+                                                    checked={challenge.isCompleted}
+                                                    disabled={togglingChallengeId === challenge.id || deletingChallengeId === challenge.id}
+                                                    onChange={() => toggleChallengeCompletion(post.id, challenge.id)}
+                                                  />
+                                                  <div className="min-w-0">
+                                                    <p className={challenge.isCompleted ? 'text-sm text-yellow-950/70 line-through' : 'text-sm text-yellow-950'}>
+                                                      <span className="font-semibold">{challenge.authorName}:</span> {challenge.challengeText}
                                                     </p>
-                                                  )}
+                                                    {challenge.taggedDisplayName && (
+                                                      <p className="text-sm  text-black">@ <span className='-ml-0.5 font-medium text-yellow-900'>{challenge.taggedDisplayName}</span></p>
+                                                    )}
+                                                    {challenge.isCompleted && challenge.completedByDisplayName && (
+                                                      <p className="text-sm text-yellow-900/80">
+                                                        Checked by {challenge.completedByDisplayName}
+                                                      </p>
+                                                    )}
+                                                  </div>
                                                 </div>
-                                              </label>
+                                                {challenge.authorUserId.toLowerCase() === userId.toLowerCase() && (
+                                                  <Button
+                                                    aria-label="Delete challenge"
+                                                    isIconOnly
+                                                    className="bg-transparent my-auto focus:scale-90 duration-75 transition text-danger"
+                                                    isDisabled={deletingChallengeId === challenge.id || togglingChallengeId === challenge.id}
+                                                    size="md"
+                                                    onPress={() => openChallengeDeleteModal(post.id, challenge.id, challenge.challengeText)}
+                                                  >
+                                                    <TrashIcon className='h-5 w-5' />
+                                                  </Button>
+                                                )}
+                                              </div>
                                             ))}
                                           </div>
                                         )}
@@ -1725,6 +1797,45 @@ export default function App() {
         </Modal.Backdrop>
       </Modal.Root>
 
+      <Modal.Root state={challengeDeleteModal}>
+        <Modal.Trigger className="sr-only">
+          <span>Confirm challenge deletion</span>
+        </Modal.Trigger>
+
+        <Modal.Backdrop isDismissable={!deletingChallengeId}>
+          <Modal.Container placement="center">
+            <Modal.Dialog>
+              <Modal.Header>
+                <Modal.Heading>Delete Challenge?</Modal.Heading>
+                <Modal.CloseTrigger isDisabled={Boolean(deletingChallengeId)} />
+              </Modal.Header>
+
+              <Modal.Body>
+                <p className="text-sm text-muted">
+                  {pendingChallengeDelete
+                    ? `Are you sure you want to delete "${pendingChallengeDelete.challengeText}"?`
+                    : 'Are you sure you want to delete this challenge?'}
+                </p>
+                <p className="mt-2 text-sm text-muted">This action cannot be undone.</p>
+              </Modal.Body>
+
+              <Modal.Footer className="flex justify-end gap-2">
+                <Button isDisabled={Boolean(deletingChallengeId)} onPress={closeChallengeDeleteModal}>
+                  Cancel
+                </Button>
+                <Button
+                  className="bg-danger text-danger-foreground"
+                  isDisabled={!pendingChallengeDelete || Boolean(deletingChallengeId)}
+                  onPress={confirmDeleteChallenge}
+                >
+                  {deletingChallengeId ? 'Deleting...' : 'Delete Challenge'}
+                </Button>
+              </Modal.Footer>
+            </Modal.Dialog>
+          </Modal.Container>
+        </Modal.Backdrop>
+      </Modal.Root>
+
       <Modal.Root state={postDeleteModal}>
         <Modal.Trigger className="sr-only">
           <span>Confirm post deletion</span>
@@ -1734,7 +1845,7 @@ export default function App() {
           <Modal.Container placement="center">
             <Modal.Dialog>
               <Modal.Header>
-                <Modal.Heading>Delete Event?</Modal.Heading>
+                <Modal.Heading>Delete Post?</Modal.Heading>
                 <Modal.CloseTrigger isDisabled={isDeletingPost} />
               </Modal.Header>
 
@@ -1742,7 +1853,7 @@ export default function App() {
                 <p className="text-sm text-muted">
                   {pendingPostDelete
                     ? `Are you sure you want to delete "${pendingPostDelete.title}"?`
-                    : 'Are you sure you want to delete this event?'}
+                    : 'Are you sure you want to delete this post?'}
                 </p>
                 <p className="mt-2 text-sm text-muted">This action cannot be undone.</p>
               </Modal.Body>
@@ -1752,7 +1863,7 @@ export default function App() {
                   Cancel
                 </Button>
                 <Button className="bg-danger text-danger-foreground" isDisabled={isDeletingPost} onPress={confirmDeletePost}>
-                  {isDeletingPost ? 'Deleting...' : 'Delete Event'}
+                  {isDeletingPost ? 'Deleting...' : 'Delete Post'}
                 </Button>
               </Modal.Footer>
             </Modal.Dialog>

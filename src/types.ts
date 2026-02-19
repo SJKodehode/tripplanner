@@ -25,6 +25,7 @@ export interface FeedComment {
 
 export interface FeedChallenge {
   id: string
+  authorUserId: string
   authorName: string
   challengeText: string
   taggedUserId: string | null
@@ -47,6 +48,7 @@ export interface FeedPost {
   locationName: string
   latitude: string
   longitude: string
+  authorUserId: string
   authorName: string
   createdAt: string
   voteCount: number
