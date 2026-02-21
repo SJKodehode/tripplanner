@@ -1742,7 +1742,7 @@ export default function App() {
                       <Button className={'w-full'} onPress={() => entryModal.open()}>Trip Options</Button>
                       <Button 
                         aria-label="Delete trip"
-                        isIconOnly
+                        
                         className="bg-danger w-full text-danger-foreground"
                         onPress={() => tripDeleteModal.open()}
                       >
