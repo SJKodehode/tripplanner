@@ -1740,13 +1740,13 @@ export default function App() {
                         New Trip
                       </Button>
                       <Button className={'w-full'} onPress={() => entryModal.open()}>Trip Options</Button>
-                      <Button
+                      <Button 
                         aria-label="Delete trip"
                         isIconOnly
-                        className="bg-danger text-danger-foreground"
+                        className="bg-danger w-full text-danger-foreground"
                         onPress={() => tripDeleteModal.open()}
                       >
-                        <TrashIcon className="h-5 w-5" />
+                        Delete
                       </Button>
                     </div>
                   </Card.Content>
