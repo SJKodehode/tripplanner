@@ -1,4 +1,15 @@
-import type { ComposerType, FeedChallenge, FeedComment, FeedPost, TripData, TripDay, TripMember, TripSummary } from './types'
+import type {
+  ComposerType,
+  FeedChallenge,
+  FeedComment,
+  FeedCrawlLocation,
+  FeedCrawlLocationChallenge,
+  FeedPost,
+  TripData,
+  TripDay,
+  TripMember,
+  TripSummary,
+} from './types'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:3001'
 let accessTokenGetter: (() => Promise<string | null>) | null = null
@@ -31,7 +42,14 @@ interface CreatePostInput {
   locationName: string
   latitude: string
   longitude: string
+  crawlLocations?: CreateCrawlLocationInput[]
   images?: File[]
+}
+
+interface CreateCrawlLocationInput {
+  locationName: string
+  latitude: string
+  longitude: string
 }
 
 interface CreateCommentInput {
@@ -44,6 +62,11 @@ interface CreateChallengeInput {
   displayName: string
   challengeText: string
   taggedUserId: string | null
+}
+
+interface CreateCrawlLocationChallengeInput {
+  displayName: string
+  challengeText: string
 }
 
 interface TripResponse {
@@ -61,6 +84,10 @@ interface CommentResponse {
 
 interface ChallengeResponse {
   challenge: FeedChallenge
+}
+
+interface CrawlLocationChallengeResponse {
+  challenge: FeedCrawlLocationChallenge
 }
 
 interface SuccessResponse {
@@ -301,6 +328,68 @@ function normalizeChallenge(raw: unknown): FeedChallenge {
   }
 }
 
+function normalizeCrawlLocationChallenge(raw: unknown): FeedCrawlLocationChallenge {
+  if (!isObject(raw)) {
+    return {
+      id: '',
+      authorUserId: '',
+      authorName: 'Traveler',
+      challengeText: '',
+      isCompleted: false,
+      completedByUserId: null,
+      completedByDisplayName: null,
+      createdAt: new Date().toISOString(),
+    }
+  }
+
+  const completedByUserId = asString(raw.completedByUserId)
+  const completedByDisplayName = asString(raw.completedByDisplayName)
+
+  return {
+    id: asString(raw.id),
+    authorUserId: asString(raw.authorUserId),
+    authorName: asString(raw.authorName, 'Traveler'),
+    challengeText: asString(raw.challengeText),
+    isCompleted: asBoolean(raw.isCompleted, false),
+    completedByUserId: completedByUserId || null,
+    completedByDisplayName: completedByDisplayName || null,
+    createdAt: asString(raw.createdAt, new Date().toISOString()),
+  }
+}
+
+function normalizeCrawlLocation(raw: unknown): FeedCrawlLocation {
+  if (!isObject(raw)) {
+    return {
+      id: '',
+      sortOrder: 0,
+      locationName: '',
+      latitude: '',
+      longitude: '',
+      isCompleted: false,
+      images: [],
+      challenges: [],
+    }
+  }
+
+  const challenges = Array.isArray(raw.challenges)
+    ? raw.challenges.map(normalizeCrawlLocationChallenge).filter((challenge) => challenge.id)
+    : []
+  const images = Array.isArray(raw.images)
+    ? raw.images.map((image) => normalizeImageUrl(image)).filter((image) => image.length > 0)
+    : []
+
+  return {
+    id: asString(raw.id),
+    sortOrder: Math.max(0, asNumber(raw.sortOrder, 0)),
+    locationName: asString(raw.locationName),
+    latitude: asString(raw.latitude),
+    longitude: asString(raw.longitude),
+    isCompleted: asBoolean(raw.isCompleted, false),
+    images,
+    challenges,
+  }
+}
+
 function normalizePost(raw: unknown): FeedPost {
   if (!isObject(raw)) {
     return {
@@ -323,6 +412,7 @@ function normalizePost(raw: unknown): FeedPost {
       voterDisplayNames: [],
       images: [],
       challenges: [],
+      crawlLocations: [],
       comments: [],
     }
   }
@@ -334,8 +424,11 @@ function normalizePost(raw: unknown): FeedPost {
   const challenges = Array.isArray(raw.challenges)
     ? raw.challenges.map(normalizeChallenge).filter((challenge) => challenge.id)
     : []
+  const crawlLocations = Array.isArray(raw.crawlLocations)
+    ? raw.crawlLocations.map(normalizeCrawlLocation).filter((location) => location.id)
+    : []
   const postTypeRaw = asString(raw.postType, 'SUGGESTION')
-  const postType = postTypeRaw === 'EVENT' ? 'EVENT' : 'SUGGESTION'
+  const postType = postTypeRaw === 'EVENT' || postTypeRaw === 'CRAWL' ? postTypeRaw : 'SUGGESTION'
 
   return {
     id: asString(raw.id),
@@ -357,6 +450,7 @@ function normalizePost(raw: unknown): FeedPost {
     voterDisplayNames: normalizeDisplayNameList(raw.voterDisplayNames),
     images,
     challenges,
+    crawlLocations,
     comments,
   }
 }
@@ -479,6 +573,7 @@ export async function createPost(tripId: string, input: CreatePostInput): Promis
   formData.set('locationName', input.locationName)
   formData.set('latitude', input.latitude)
   formData.set('longitude', input.longitude)
+  formData.set('crawlLocations', JSON.stringify(input.crawlLocations ?? []))
 
   for (const image of input.images ?? []) {
     formData.append('images', image)
@@ -487,6 +582,24 @@ export async function createPost(tripId: string, input: CreatePostInput): Promis
   const response = await request<PostResponse>(`/api/trips/${tripId}/posts`, {
     method: 'POST',
     body: formData,
+  })
+
+  return normalizePost(response.post)
+}
+
+export async function reorderCrawlLocations(postId: string, orderedLocationIds: string[]): Promise<FeedPost> {
+  const response = await request<PostResponse>(`/api/posts/${postId}/crawl-locations/reorder`, {
+    method: 'PATCH',
+    body: JSON.stringify({ orderedLocationIds }),
+  })
+
+  return normalizePost(response.post)
+}
+
+export async function toggleCrawlLocation(postId: string, locationId: string): Promise<FeedPost> {
+  const response = await request<PostResponse>(`/api/posts/${postId}/crawl-locations/${locationId}/toggle`, {
+    method: 'PATCH',
+    body: JSON.stringify({}),
   })
 
   return normalizePost(response.post)
@@ -519,6 +632,45 @@ export async function toggleChallenge(postId: string, challengeId: string): Prom
   return normalizeChallenge(response.challenge)
 }
 
+export async function createCrawlLocationChallenge(
+  postId: string,
+  locationId: string,
+  input: CreateCrawlLocationChallengeInput,
+): Promise<FeedCrawlLocationChallenge> {
+  const response = await request<CrawlLocationChallengeResponse>(
+    `/api/posts/${postId}/crawl-locations/${locationId}/challenges`,
+    {
+      method: 'POST',
+      body: JSON.stringify(input),
+    },
+  )
+
+  return normalizeCrawlLocationChallenge(response.challenge)
+}
+
+export async function toggleCrawlLocationChallenge(
+  postId: string,
+  locationId: string,
+  challengeId: string,
+): Promise<FeedCrawlLocationChallenge> {
+  const response = await request<CrawlLocationChallengeResponse>(
+    `/api/posts/${postId}/crawl-locations/${locationId}/challenges/${challengeId}/toggle`,
+    {
+      method: 'PATCH',
+      body: JSON.stringify({}),
+    },
+  )
+
+  return normalizeCrawlLocationChallenge(response.challenge)
+}
+
+export async function deleteCrawlLocationChallenge(postId: string, locationId: string, challengeId: string): Promise<void> {
+  await request<SuccessResponse>(`/api/posts/${postId}/crawl-locations/${locationId}/challenges/${challengeId}`, {
+    method: 'DELETE',
+    body: JSON.stringify({}),
+  })
+}
+
 export async function deleteChallenge(postId: string, challengeId: string): Promise<void> {
   await request<SuccessResponse>(`/api/posts/${postId}/challenges/${challengeId}`, {
     method: 'DELETE',
@@ -531,6 +683,36 @@ export async function deletePost(postId: string, userId: string): Promise<void> 
     method: 'DELETE',
     body: JSON.stringify({ userId }),
   })
+}
+
+export async function uploadPostImages(postId: string, images: File[]): Promise<FeedPost> {
+  const formData = new FormData()
+
+  for (const image of images) {
+    formData.append('images', image)
+  }
+
+  const response = await request<PostResponse>(`/api/posts/${postId}/images`, {
+    method: 'POST',
+    body: formData,
+  })
+
+  return normalizePost(response.post)
+}
+
+export async function uploadCrawlLocationImages(postId: string, locationId: string, images: File[]): Promise<FeedPost> {
+  const formData = new FormData()
+
+  for (const image of images) {
+    formData.append('images', image)
+  }
+
+  const response = await request<PostResponse>(`/api/posts/${postId}/crawl-locations/${locationId}/images`, {
+    method: 'POST',
+    body: formData,
+  })
+
+  return normalizePost(response.post)
 }
 
 export async function deleteTrip(tripId: string, userId: string): Promise<void> {

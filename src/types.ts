@@ -1,4 +1,4 @@
-export type ComposerType = 'SUGGESTION' | 'EVENT'
+export type ComposerType = 'SUGGESTION' | 'EVENT' | 'CRAWL'
 
 export interface TripDay {
   dayNumber: number
@@ -36,6 +36,28 @@ export interface FeedChallenge {
   createdAt: string
 }
 
+export interface FeedCrawlLocationChallenge {
+  id: string
+  authorUserId: string
+  authorName: string
+  challengeText: string
+  isCompleted: boolean
+  completedByUserId: string | null
+  completedByDisplayName: string | null
+  createdAt: string
+}
+
+export interface FeedCrawlLocation {
+  id: string
+  sortOrder: number
+  locationName: string
+  latitude: string
+  longitude: string
+  isCompleted: boolean
+  images: string[]
+  challenges: FeedCrawlLocationChallenge[]
+}
+
 export interface FeedPost {
   id: string
   dayNumber: number
@@ -56,6 +78,7 @@ export interface FeedPost {
   voterDisplayNames: string[]
   images: string[]
   challenges: FeedChallenge[]
+  crawlLocations: FeedCrawlLocation[]
   comments: FeedComment[]
 }
 

@@ -18,6 +18,7 @@ enum MemberRole {
 enum PostType {
   SUGGESTION
   EVENT
+  CRAWL
   PIN
 
   @@map("post_type")
@@ -38,6 +39,8 @@ model User {
   authoredChallenges  FeedPostChallenge[] @relation("FeedPostChallengesAuthor")
   taggedChallenges    FeedPostChallenge[] @relation("FeedPostChallengesTagged")
   completedChallenges FeedPostChallenge[] @relation("FeedPostChallengesCompleted")
+  authoredCrawlLocationChallenges  FeedPostCrawlLocationChallenge[] @relation("FeedPostCrawlLocationChallengesAuthor")
+  completedCrawlLocationChallenges FeedPostCrawlLocationChallenge[] @relation("FeedPostCrawlLocationChallengesCompleted")
 
   @@map("users")
   @@schema("app")
@@ -117,10 +120,48 @@ model FeedPost {
   postVotes     PostVote[]
   feedPostImages FeedPostImage[]
   feedPostChallenges FeedPostChallenge[]
+  feedPostCrawlLocations FeedPostCrawlLocation[]
 
   @@index([tripId, createdAt(sort: Desc)], map: "ix_feed_posts_trip_id_created_at")
   @@index([tripDayId, createdAt(sort: Desc)], map: "ix_feed_posts_trip_day_id_created_at")
   @@map("feed_posts")
+  @@schema("app")
+}
+
+model FeedPostCrawlLocation {
+  feedPostCrawlLocationId String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid @map("feed_post_crawl_location_id")
+  feedPostId              String   @map("feed_post_id") @db.Uuid
+  sortOrder               Int      @default(0) @map("sort_order")
+  locationName            String   @map("location_name") @db.VarChar(200)
+  latitude                Decimal? @db.Decimal(9, 6)
+  longitude               Decimal? @db.Decimal(9, 6)
+  isCompleted             Boolean  @default(false) @map("is_completed")
+  createdAt               DateTime @default(now()) @map("created_at") @db.Timestamptz(0)
+  updatedAt               DateTime @default(now()) @map("updated_at") @db.Timestamptz(0)
+  feedPost                FeedPost @relation(fields: [feedPostId], references: [feedPostId], onDelete: Cascade, map: "fk_feed_post_crawl_locations_post")
+  feedPostCrawlLocationImages FeedPostCrawlLocationImage[]
+  feedPostCrawlLocationChallenges FeedPostCrawlLocationChallenge[]
+
+  @@index([feedPostId, sortOrder, createdAt], map: "ix_feed_post_crawl_locations_feed_post_id_sort_order")
+  @@map("feed_post_crawl_locations")
+  @@schema("app")
+}
+
+model FeedPostCrawlLocationChallenge {
+  feedPostCrawlLocationChallengeId String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid @map("feed_post_crawl_location_challenge_id")
+  feedPostCrawlLocationId          String               @map("feed_post_crawl_location_id") @db.Uuid
+  authorUserId                     String               @map("author_user_id") @db.Uuid
+  challengeText                    String               @map("challenge_text") @db.VarChar(500)
+  isCompleted                      Boolean              @default(false) @map("is_completed")
+  completedByUserId                String?              @map("completed_by_user_id") @db.Uuid
+  createdAt                        DateTime             @default(now()) @map("created_at") @db.Timestamptz(0)
+  updatedAt                        DateTime             @default(now()) @map("updated_at") @db.Timestamptz(0)
+  feedPostCrawlLocation            FeedPostCrawlLocation @relation(fields: [feedPostCrawlLocationId], references: [feedPostCrawlLocationId], onDelete: Cascade, map: "fk_feed_post_crawl_location_challenges_location")
+  author                           User                 @relation("FeedPostCrawlLocationChallengesAuthor", fields: [authorUserId], references: [userId], map: "fk_feed_post_crawl_location_challenges_author")
+  completedByUser                  User?                @relation("FeedPostCrawlLocationChallengesCompleted", fields: [completedByUserId], references: [userId], map: "fk_feed_post_crawl_location_challenges_completed_by")
+
+  @@index([feedPostCrawlLocationId, createdAt], map: "ix_feed_post_crawl_location_challenges_location_id_created_at")
+  @@map("feed_post_crawl_location_challenges")
   @@schema("app")
 }
 
@@ -183,5 +224,18 @@ model FeedPostImage {
 
   @@index([feedPostId, sortOrder, createdAt], map: "ix_feed_post_images_feed_post_id_sort_order")
   @@map("feed_post_images")
+  @@schema("app")
+}
+
+model FeedPostCrawlLocationImage {
+  crawlLocationImageId  String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid @map("crawl_location_image_id")
+  feedPostCrawlLocationId String             @map("feed_post_crawl_location_id") @db.Uuid
+  imageUrl              String               @map("image_url") @db.VarChar(500)
+  sortOrder             Int                  @default(0) @map("sort_order")
+  createdAt             DateTime             @default(now()) @map("created_at") @db.Timestamptz(0)
+  feedPostCrawlLocation FeedPostCrawlLocation @relation(fields: [feedPostCrawlLocationId], references: [feedPostCrawlLocationId], onDelete: Cascade, map: "fk_feed_post_crawl_location_images_location")
+
+  @@index([feedPostCrawlLocationId, sortOrder, createdAt], map: "ix_feed_post_crawl_location_images_location_id_sort_order")
+  @@map("feed_post_crawl_location_images")
   @@schema("app")
 }

@@ -30,6 +30,9 @@ const uploadsDir = path.resolve(currentDir, 'uploads')
 const maxPostImageCount = 6
 const maxPostImageSizeBytes = 8 * 1024 * 1024
 const maxChallengesPerPost = 3
+const maxCrawlLocationsPerPost = 12
+const maxChallengesPerCrawlLocation = 3
+const maxCrawlLocationImageCount = 6
 
 function createPrismaResources(rawDatabaseUrl) {
   const trimmed = (rawDatabaseUrl ?? '').trim()
@@ -120,7 +123,7 @@ app.use(cors())
 app.use(express.json({ limit: '1mb' }))
 app.use('/uploads', express.static(uploadsDir))
 
-const POST_TYPES = new Set(['SUGGESTION', 'EVENT'])
+const POST_TYPES = new Set(['SUGGESTION', 'EVENT', 'CRAWL'])
 const imageMimeToExt = {
   'image/jpeg': '.jpg',
   'image/png': '.png',
@@ -463,6 +466,58 @@ function normalizeLongitude(value) {
   return parsed
 }
 
+function normalizeCrawlLocations(value) {
+  if (value == null || value === '') {
+    return []
+  }
+
+  let parsed = value
+
+  if (typeof parsed === 'string') {
+    const trimmed = parsed.trim()
+
+    if (!trimmed) {
+      return []
+    }
+
+    try {
+      parsed = JSON.parse(trimmed)
+    } catch {
+      throw new ApiError(400, 'Crawl locations payload is invalid JSON.')
+    }
+  }
+
+  if (!Array.isArray(parsed)) {
+    throw new ApiError(400, 'Crawl locations payload must be an array.')
+  }
+
+  if (parsed.length > maxCrawlLocationsPerPost) {
+    throw new ApiError(400, `Crawl posts can include up to ${maxCrawlLocationsPerPost} locations.`)
+  }
+
+  return parsed.map((entry, index) => {
+    if (!entry || typeof entry !== 'object') {
+      throw new ApiError(400, 'Each crawl location must be an object.')
+    }
+
+    const locationName = toTrimmedString(entry.locationName).slice(0, 200)
+
+    if (!locationName) {
+      throw new ApiError(400, 'Each crawl location needs a location name.')
+    }
+
+    const latitude = normalizeLatitude(entry.latitude)
+    const longitude = normalizeLongitude(entry.longitude)
+
+    return {
+      locationName,
+      latitude,
+      longitude,
+      sortOrder: index,
+    }
+  })
+}
+
 function normalizeChallengeText(value) {
   const trimmed = toTrimmedString(value)
 
@@ -789,6 +844,36 @@ function mapChallengeRow(row) {
   }
 }
 
+function mapCrawlLocationChallengeRow(row) {
+  return {
+    id: row.feedPostCrawlLocationChallengeId,
+    authorUserId: row.authorUserId,
+    authorName: toTrimmedString(row.author?.displayName) || 'Traveler',
+    challengeText: row.challengeText ?? '',
+    isCompleted: Boolean(row.isCompleted),
+    completedByUserId: row.completedByUserId ?? null,
+    completedByDisplayName: toTrimmedString(row.completedByUser?.displayName) || null,
+    createdAt: serializeDate(row.createdAt),
+  }
+}
+
+function mapCrawlLocationImageUrl(row) {
+  return row.imageUrl
+}
+
+function mapCrawlLocationRow(row) {
+  return {
+    id: row.feedPostCrawlLocationId,
+    sortOrder: row.sortOrder ?? 0,
+    locationName: row.locationName ?? '',
+    latitude: row.latitude == null ? '' : String(row.latitude),
+    longitude: row.longitude == null ? '' : String(row.longitude),
+    isCompleted: Boolean(row.isCompleted),
+    images: (row.feedPostCrawlLocationImages ?? []).map(mapCrawlLocationImageUrl),
+    challenges: (row.feedPostCrawlLocationChallenges ?? []).map(mapCrawlLocationChallengeRow),
+  }
+}
+
 function buildVoteInfo(postVotes, currentUserId = null) {
   const voterDisplayNames = []
   let hasVoted = false
@@ -836,6 +921,7 @@ function mapPostRow(row, currentUserId = null) {
     voterDisplayNames: voteInfo.voterDisplayNames,
     images: (row.feedPostImages ?? []).map((image) => image.imageUrl),
     challenges: (row.feedPostChallenges ?? []).map(mapChallengeRow),
+    crawlLocations: (row.feedPostCrawlLocations ?? []).map(mapCrawlLocationRow),
   }
 }
 async function getTripById(db, tripId, currentUserId = null) {
@@ -932,6 +1018,37 @@ async function getTripById(db, tripId, currentUserId = null) {
               completedByUser: {
                 select: {
                   displayName: true,
+                },
+              },
+            },
+          },
+          feedPostCrawlLocations: {
+            orderBy: [
+              { sortOrder: 'asc' },
+              { createdAt: 'asc' },
+            ],
+            include: {
+              feedPostCrawlLocationImages: {
+                orderBy: [
+                  { sortOrder: 'asc' },
+                  { createdAt: 'asc' },
+                ],
+              },
+              feedPostCrawlLocationChallenges: {
+                orderBy: {
+                  createdAt: 'asc',
+                },
+                include: {
+                  author: {
+                    select: {
+                      displayName: true,
+                    },
+                  },
+                  completedByUser: {
+                    select: {
+                      displayName: true,
+                    },
+                  },
                 },
               },
             },
@@ -1040,6 +1157,37 @@ async function getPostById(db, postId, currentUserId = null) {
           },
         },
       },
+      feedPostCrawlLocations: {
+        orderBy: [
+          { sortOrder: 'asc' },
+          { createdAt: 'asc' },
+        ],
+        include: {
+          feedPostCrawlLocationImages: {
+            orderBy: [
+              { sortOrder: 'asc' },
+              { createdAt: 'asc' },
+            ],
+          },
+          feedPostCrawlLocationChallenges: {
+            orderBy: {
+              createdAt: 'asc',
+            },
+            include: {
+              author: {
+                select: {
+                  displayName: true,
+                },
+              },
+              completedByUser: {
+                select: {
+                  displayName: true,
+                },
+              },
+            },
+          },
+        },
+      },
     },
   })
 
@@ -1101,6 +1249,32 @@ async function getChallengeById(db, challengeId) {
   }
 
   return mapChallengeRow(challenge)
+}
+
+async function getCrawlLocationChallengeById(db, challengeId) {
+  const challenge = await db.feedPostCrawlLocationChallenge.findFirst({
+    where: {
+      feedPostCrawlLocationChallengeId: challengeId,
+    },
+    include: {
+      author: {
+        select: {
+          displayName: true,
+        },
+      },
+      completedByUser: {
+        select: {
+          displayName: true,
+        },
+      },
+    },
+  })
+
+  if (!challenge) {
+    return null
+  }
+
+  return mapCrawlLocationChallengeRow(challenge)
 }
 
 async function createTripRecord(db, { tripName, destinationName, startDate, dayCount, userId }) {
@@ -1296,6 +1470,7 @@ app.post('/api/trips/:tripId/posts', postImageUpload.array('images', maxPostImag
     const locationName = toTrimmedString(req.body.locationName).slice(0, 200)
     const latitude = normalizeLatitude(req.body.latitude)
     const longitude = normalizeLongitude(req.body.longitude)
+    const crawlLocations = normalizeCrawlLocations(req.body.crawlLocations)
 
     if (postType === 'SUGGESTION' && !title && !body && uploadedFiles.length === 0) {
       throw new ApiError(400, 'Suggestion post needs a title or body.')
@@ -1308,6 +1483,24 @@ app.post('/api/trips/:tripId/posts', postImageUpload.array('images', maxPostImag
 
       if (fromTime >= toTime) {
         throw new ApiError(400, 'Event end time must be after start time.')
+      }
+    }
+
+    if (postType === 'CRAWL') {
+      if (!title) {
+        throw new ApiError(400, 'Crawl post needs a title.')
+      }
+
+      if (!fromTime || !toTime) {
+        throw new ApiError(400, 'Crawl post needs both start and end time.')
+      }
+
+      if (fromTime >= toTime) {
+        throw new ApiError(400, 'Crawl end time must be after start time.')
+      }
+
+      if (crawlLocations.length === 0) {
+        throw new ApiError(400, 'Crawl post needs at least one location.')
       }
     }
 
@@ -1343,6 +1536,7 @@ app.post('/api/trips/:tripId/posts', postImageUpload.array('images', maxPostImag
 
     const tripDayId = dayRecord.tripDayId
     const imageUrls = uploadedFiles.map((file) => `/uploads/${file.filename}`)
+    const firstCrawlLocation = crawlLocations[0] ?? null
 
     const postId = await db.$transaction(async (tx) => {
       const createdPost = await tx.feedPost.create({
@@ -1356,14 +1550,26 @@ app.post('/api/trips/:tripId/posts', postImageUpload.array('images', maxPostImag
           eventName: eventName || null,
           fromTime: timeStringToDate(fromTime),
           toTime: timeStringToDate(toTime),
-          locationName: locationName || null,
-          latitude,
-          longitude,
+          locationName: postType === 'CRAWL' ? (firstCrawlLocation?.locationName ?? null) : (locationName || null),
+          latitude: postType === 'CRAWL' ? (firstCrawlLocation?.latitude ?? null) : latitude,
+          longitude: postType === 'CRAWL' ? (firstCrawlLocation?.longitude ?? null) : longitude,
         },
         select: {
           feedPostId: true,
         },
       })
+
+      if (postType === 'CRAWL' && crawlLocations.length > 0) {
+        await tx.feedPostCrawlLocation.createMany({
+          data: crawlLocations.map((crawlLocation, index) => ({
+            feedPostId: createdPost.feedPostId,
+            sortOrder: index,
+            locationName: crawlLocation.locationName,
+            latitude: crawlLocation.latitude,
+            longitude: crawlLocation.longitude,
+          })),
+        })
+      }
 
       if (imageUrls.length > 0) {
         await tx.feedPostImage.createMany({
@@ -1387,6 +1593,560 @@ app.post('/api/trips/:tripId/posts', postImageUpload.array('images', maxPostImag
     res.status(201).json({ post })
   } catch (error) {
     await cleanupUploadedFiles(uploadedFiles)
+    next(error)
+  }
+})
+
+app.patch('/api/posts/:postId/crawl-locations/reorder', async (req, res, next) => {
+  try {
+    const db = await getDb()
+    const postId = req.params.postId
+    const { userId } = await resolveAuthenticatedUser(db, req)
+    const rawOrderedIds = Array.isArray(req.body.orderedLocationIds) ? req.body.orderedLocationIds : null
+
+    if (!rawOrderedIds) {
+      throw new ApiError(400, 'orderedLocationIds must be an array.')
+    }
+
+    const orderedLocationIds = rawOrderedIds
+      .map((entry) => toTrimmedString(entry))
+      .filter((entry) => entry.length > 0)
+
+    const post = await db.feedPost.findFirst({
+      where: {
+        feedPostId: postId,
+        postType: 'CRAWL',
+        isDeleted: false,
+      },
+      select: {
+        tripId: true,
+      },
+    })
+
+    if (!post) {
+      throw new ApiError(404, 'Crawl post not found.')
+    }
+
+    const member = await isTripMember(db, post.tripId, userId)
+
+    if (!member) {
+      throw new ApiError(403, 'Join this trip before updating crawl locations.')
+    }
+
+    const crawlLocations = await db.feedPostCrawlLocation.findMany({
+      where: {
+        feedPostId: postId,
+      },
+      select: {
+        feedPostCrawlLocationId: true,
+      },
+      orderBy: [
+        { sortOrder: 'asc' },
+        { createdAt: 'asc' },
+      ],
+    })
+
+    if (crawlLocations.length === 0) {
+      throw new ApiError(400, 'This crawl post has no locations to reorder.')
+    }
+
+    if (orderedLocationIds.length !== crawlLocations.length) {
+      throw new ApiError(400, 'orderedLocationIds must include all crawl locations exactly once.')
+    }
+
+    const currentIds = crawlLocations.map((row) => row.feedPostCrawlLocationId).sort()
+    const nextIds = [...orderedLocationIds].sort()
+
+    if (currentIds.some((id, index) => id !== nextIds[index])) {
+      throw new ApiError(400, 'orderedLocationIds contains unknown crawl location ids.')
+    }
+
+    await db.$transaction(async (tx) => {
+      await Promise.all(
+        orderedLocationIds.map((locationId, index) =>
+          tx.feedPostCrawlLocation.update({
+            where: {
+              feedPostCrawlLocationId: locationId,
+            },
+            data: {
+              sortOrder: index,
+              updatedAt: new Date(),
+            },
+          }),
+        ),
+      )
+
+      await tx.feedPost.update({
+        where: {
+          feedPostId: postId,
+        },
+        data: {
+          updatedAt: new Date(),
+        },
+      })
+    })
+
+    const updatedPost = await getPostById(db, postId, userId)
+
+    if (!updatedPost) {
+      throw new ApiError(500, 'Crawl locations were reordered but the post could not be loaded.')
+    }
+
+    res.json({ post: updatedPost })
+  } catch (error) {
+    next(error)
+  }
+})
+
+app.patch('/api/posts/:postId/crawl-locations/:locationId/toggle', async (req, res, next) => {
+  try {
+    const db = await getDb()
+    const postId = req.params.postId
+    const locationId = req.params.locationId
+    const { userId } = await resolveAuthenticatedUser(db, req)
+
+    const crawlLocation = await db.feedPostCrawlLocation.findFirst({
+      where: {
+        feedPostCrawlLocationId: locationId,
+        feedPostId: postId,
+      },
+      include: {
+        feedPost: {
+          select: {
+            tripId: true,
+            postType: true,
+            isDeleted: true,
+          },
+        },
+      },
+    })
+
+    if (!crawlLocation || crawlLocation.feedPost?.isDeleted || crawlLocation.feedPost?.postType !== 'CRAWL') {
+      throw new ApiError(404, 'Crawl location not found.')
+    }
+
+    const member = await isTripMember(db, crawlLocation.feedPost.tripId, userId)
+
+    if (!member) {
+      throw new ApiError(403, 'Join this trip before updating crawl locations.')
+    }
+
+    await db.$transaction(async (tx) => {
+      await tx.feedPostCrawlLocation.update({
+        where: {
+          feedPostCrawlLocationId: locationId,
+        },
+        data: {
+          isCompleted: !crawlLocation.isCompleted,
+          updatedAt: new Date(),
+        },
+      })
+
+      await tx.feedPost.update({
+        where: {
+          feedPostId: postId,
+        },
+        data: {
+          updatedAt: new Date(),
+        },
+      })
+    })
+
+    const updatedPost = await getPostById(db, postId, userId)
+
+    if (!updatedPost) {
+      throw new ApiError(500, 'Crawl location was updated but the post could not be loaded.')
+    }
+
+    res.json({ post: updatedPost })
+  } catch (error) {
+    next(error)
+  }
+})
+
+app.post('/api/posts/:postId/images', postImageUpload.array('images', maxPostImageCount), async (req, res, next) => {
+  const uploadedFiles = getUploadedFiles(req)
+
+  try {
+    const db = await getDb()
+    const postId = req.params.postId
+    const { userId } = await resolveAuthenticatedUser(db, req)
+
+    if (uploadedFiles.length === 0) {
+      throw new ApiError(400, 'Select at least one image to upload.')
+    }
+
+    const post = await db.feedPost.findFirst({
+      where: {
+        feedPostId: postId,
+        isDeleted: false,
+      },
+      select: {
+        tripId: true,
+      },
+    })
+
+    if (!post) {
+      throw new ApiError(404, 'Post not found.')
+    }
+
+    const member = await isTripMember(db, post.tripId, userId)
+
+    if (!member) {
+      throw new ApiError(403, 'Join this trip before uploading images.')
+    }
+
+    const imageUrls = uploadedFiles.map((file) => `/uploads/${file.filename}`)
+
+    await db.$transaction(async (tx) => {
+      const existingImageCount = await tx.feedPostImage.count({
+        where: {
+          feedPostId: postId,
+        },
+      })
+
+      if (existingImageCount + imageUrls.length > maxPostImageCount) {
+        throw new ApiError(400, `Each post can include up to ${maxPostImageCount} images total.`)
+      }
+
+      await tx.feedPostImage.createMany({
+        data: imageUrls.map((imageUrl, index) => ({
+          feedPostId: postId,
+          imageUrl,
+          sortOrder: existingImageCount + index,
+        })),
+      })
+
+      await tx.feedPost.update({
+        where: {
+          feedPostId: postId,
+        },
+        data: {
+          updatedAt: new Date(),
+        },
+      })
+    })
+
+    const updatedPost = await getPostById(db, postId, userId)
+
+    if (!updatedPost) {
+      throw new ApiError(500, 'Images were uploaded but the post could not be loaded.')
+    }
+
+    res.status(201).json({ post: updatedPost })
+  } catch (error) {
+    await cleanupUploadedFiles(uploadedFiles)
+    next(error)
+  }
+})
+
+app.post('/api/posts/:postId/crawl-locations/:locationId/images', postImageUpload.array('images', maxPostImageCount), async (req, res, next) => {
+  const uploadedFiles = getUploadedFiles(req)
+
+  try {
+    const db = await getDb()
+    const postId = req.params.postId
+    const locationId = req.params.locationId
+    const { userId } = await resolveAuthenticatedUser(db, req)
+
+    if (uploadedFiles.length === 0) {
+      throw new ApiError(400, 'Select at least one image to upload.')
+    }
+
+    const crawlLocation = await db.feedPostCrawlLocation.findFirst({
+      where: {
+        feedPostCrawlLocationId: locationId,
+        feedPostId: postId,
+      },
+      include: {
+        feedPost: {
+          select: {
+            tripId: true,
+            postType: true,
+            isDeleted: true,
+          },
+        },
+      },
+    })
+
+    if (!crawlLocation || crawlLocation.feedPost?.isDeleted || crawlLocation.feedPost?.postType !== 'CRAWL') {
+      throw new ApiError(404, 'Crawl location not found.')
+    }
+
+    const member = await isTripMember(db, crawlLocation.feedPost.tripId, userId)
+
+    if (!member) {
+      throw new ApiError(403, 'Join this trip before uploading crawl location images.')
+    }
+
+    const imageUrls = uploadedFiles.map((file) => `/uploads/${file.filename}`)
+
+    await db.$transaction(async (tx) => {
+      const existingImageCount = await tx.feedPostCrawlLocationImage.count({
+        where: {
+          feedPostCrawlLocationId: locationId,
+        },
+      })
+
+      if (existingImageCount + imageUrls.length > maxCrawlLocationImageCount) {
+        throw new ApiError(400, `Each crawl location can include up to ${maxCrawlLocationImageCount} images total.`)
+      }
+
+      await tx.feedPostCrawlLocationImage.createMany({
+        data: imageUrls.map((imageUrl, index) => ({
+          feedPostCrawlLocationId: locationId,
+          imageUrl,
+          sortOrder: existingImageCount + index,
+        })),
+      })
+
+      await tx.feedPost.update({
+        where: {
+          feedPostId: postId,
+        },
+        data: {
+          updatedAt: new Date(),
+        },
+      })
+    })
+
+    const updatedPost = await getPostById(db, postId, userId)
+
+    if (!updatedPost) {
+      throw new ApiError(500, 'Images were uploaded but the crawl post could not be loaded.')
+    }
+
+    res.status(201).json({ post: updatedPost })
+  } catch (error) {
+    await cleanupUploadedFiles(uploadedFiles)
+    next(error)
+  }
+})
+
+app.post('/api/posts/:postId/crawl-locations/:locationId/challenges', async (req, res, next) => {
+  try {
+    const db = await getDb()
+    const postId = req.params.postId
+    const locationId = req.params.locationId
+    const preferredDisplayName = toTrimmedString(req.body.displayName)
+    const { userId } = await resolveAuthenticatedUser(db, req, preferredDisplayName)
+    const challengeText = normalizeChallengeText(req.body.challengeText)
+
+    const crawlLocation = await db.feedPostCrawlLocation.findFirst({
+      where: {
+        feedPostCrawlLocationId: locationId,
+        feedPostId: postId,
+      },
+      include: {
+        feedPost: {
+          select: {
+            tripId: true,
+            postType: true,
+            isDeleted: true,
+          },
+        },
+      },
+    })
+
+    if (!crawlLocation || crawlLocation.feedPost?.isDeleted || crawlLocation.feedPost?.postType !== 'CRAWL') {
+      throw new ApiError(404, 'Crawl location not found.')
+    }
+
+    const member = await isTripMember(db, crawlLocation.feedPost.tripId, userId)
+
+    if (!member) {
+      throw new ApiError(403, 'Join this trip before adding crawl location challenges.')
+    }
+
+    const challengeId = await db.$transaction(async (tx) => {
+      const challengeCount = await tx.feedPostCrawlLocationChallenge.count({
+        where: {
+          feedPostCrawlLocationId: locationId,
+        },
+      })
+
+      if (challengeCount >= maxChallengesPerCrawlLocation) {
+        throw new ApiError(
+          400,
+          `Each crawl location can only have ${maxChallengesPerCrawlLocation} challenges.`,
+        )
+      }
+
+      const created = await tx.feedPostCrawlLocationChallenge.create({
+        data: {
+          feedPostCrawlLocationId: locationId,
+          authorUserId: userId,
+          challengeText,
+        },
+        select: {
+          feedPostCrawlLocationChallengeId: true,
+        },
+      })
+
+      await tx.feedPost.update({
+        where: {
+          feedPostId: postId,
+        },
+        data: {
+          updatedAt: new Date(),
+        },
+      })
+
+      return created.feedPostCrawlLocationChallengeId
+    })
+
+    const challenge = await getCrawlLocationChallengeById(db, challengeId)
+
+    if (!challenge) {
+      throw new ApiError(500, 'Challenge was created but could not be loaded.')
+    }
+
+    res.status(201).json({ challenge })
+  } catch (error) {
+    next(error)
+  }
+})
+
+app.patch('/api/posts/:postId/crawl-locations/:locationId/challenges/:challengeId/toggle', async (req, res, next) => {
+  try {
+    const db = await getDb()
+    const postId = req.params.postId
+    const locationId = req.params.locationId
+    const challengeId = req.params.challengeId
+    const { userId } = await resolveAuthenticatedUser(db, req)
+
+    const challengeRecord = await db.feedPostCrawlLocationChallenge.findFirst({
+      where: {
+        feedPostCrawlLocationChallengeId: challengeId,
+        feedPostCrawlLocationId: locationId,
+        feedPostCrawlLocation: {
+          feedPostId: postId,
+        },
+      },
+      include: {
+        feedPostCrawlLocation: {
+          include: {
+            feedPost: {
+              select: {
+                tripId: true,
+                postType: true,
+                isDeleted: true,
+              },
+            },
+          },
+        },
+      },
+    })
+
+    const post = challengeRecord?.feedPostCrawlLocation?.feedPost
+
+    if (!challengeRecord || !post || post.isDeleted || post.postType !== 'CRAWL') {
+      throw new ApiError(404, 'Crawl location challenge not found.')
+    }
+
+    const member = await isTripMember(db, post.tripId, userId)
+
+    if (!member) {
+      throw new ApiError(403, 'Join this trip before updating crawl location challenges.')
+    }
+
+    const nextCompleted = !challengeRecord.isCompleted
+
+    await db.$transaction(async (tx) => {
+      await tx.feedPostCrawlLocationChallenge.update({
+        where: {
+          feedPostCrawlLocationChallengeId: challengeId,
+        },
+        data: {
+          isCompleted: nextCompleted,
+          completedByUserId: nextCompleted ? userId : null,
+          updatedAt: new Date(),
+        },
+      })
+
+      await tx.feedPost.update({
+        where: {
+          feedPostId: postId,
+        },
+        data: {
+          updatedAt: new Date(),
+        },
+      })
+    })
+
+    const challenge = await getCrawlLocationChallengeById(db, challengeId)
+
+    if (!challenge) {
+      throw new ApiError(500, 'Challenge was updated but could not be loaded.')
+    }
+
+    res.json({ challenge })
+  } catch (error) {
+    next(error)
+  }
+})
+
+app.delete('/api/posts/:postId/crawl-locations/:locationId/challenges/:challengeId', async (req, res, next) => {
+  try {
+    const db = await getDb()
+    const postId = req.params.postId
+    const locationId = req.params.locationId
+    const challengeId = req.params.challengeId
+    const { userId } = await resolveAuthenticatedUser(db, req)
+
+    const challengeRecord = await db.feedPostCrawlLocationChallenge.findFirst({
+      where: {
+        feedPostCrawlLocationChallengeId: challengeId,
+        feedPostCrawlLocationId: locationId,
+        feedPostCrawlLocation: {
+          feedPostId: postId,
+        },
+      },
+      include: {
+        feedPostCrawlLocation: {
+          include: {
+            feedPost: {
+              select: {
+                postType: true,
+                isDeleted: true,
+              },
+            },
+          },
+        },
+      },
+    })
+
+    const post = challengeRecord?.feedPostCrawlLocation?.feedPost
+
+    if (!challengeRecord || !post || post.isDeleted || post.postType !== 'CRAWL') {
+      throw new ApiError(404, 'Crawl location challenge not found.')
+    }
+
+    const isAuthor = String(challengeRecord.authorUserId).toLowerCase() === userId.toLowerCase()
+
+    if (!isAuthor) {
+      throw new ApiError(403, 'Only the challenge author can delete this challenge.')
+    }
+
+    await db.$transaction(async (tx) => {
+      await tx.feedPostCrawlLocationChallenge.delete({
+        where: {
+          feedPostCrawlLocationChallengeId: challengeId,
+        },
+      })
+
+      await tx.feedPost.update({
+        where: {
+          feedPostId: postId,
+        },
+        data: {
+          updatedAt: new Date(),
+        },
+      })
+    })
+
+    res.json({ success: true })
+  } catch (error) {
     next(error)
   }
 })
@@ -1841,13 +2601,38 @@ async function start() {
   await mkdir(uploadsDir, { recursive: true })
   await prisma.$queryRaw`SELECT 1`
 
+  const requiredPrismaDelegates = [
+    'postVote',
+    'feedPostImage',
+    'feedPostChallenge',
+    'feedPostCrawlLocation',
+    'feedPostCrawlLocationImage',
+    'feedPostCrawlLocationChallenge',
+  ]
+  const missingPrismaDelegates = requiredPrismaDelegates.filter((delegate) => {
+    const modelClient = prisma[delegate]
+    return !modelClient || typeof modelClient.count !== 'function'
+  })
+
+  if (missingPrismaDelegates.length > 0) {
+    throw new Error(
+      `Prisma client is out of date (missing model delegates: ${missingPrismaDelegates.join(', ')}). `
+      + 'Run `npx prisma generate`, then restart the API.',
+    )
+  }
+
   try {
     await prisma.postVote.count()
     await prisma.feedPostImage.count()
     await prisma.feedPostChallenge.count()
+    await prisma.feedPostCrawlLocation.count()
+    await prisma.feedPostCrawlLocationImage.count()
+    await prisma.feedPostCrawlLocationChallenge.count()
   } catch (error) {
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2021') {
-      throw new Error('Missing tables for votes/images/challenges. Run Prisma migrations and restart the API.')
+      throw new Error(
+        'Missing tables for votes/images/challenges/crawl locations/crawl location images. Run Prisma migrations and restart the API.',
+      )
     }
 
     throw error

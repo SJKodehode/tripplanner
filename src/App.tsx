@@ -12,45 +12,84 @@ import {
 } from '@heroui/react'
 import { useAuth0 } from '@auth0/auth0-react'
 import {
+  createCrawlLocationChallenge,
   createChallenge,
   createComment,
   createPost,
   createTrip,
+  deleteCrawlLocationChallenge,
   deleteChallenge,
   deletePost,
   deleteTrip,
   fetchTrip,
   joinTrip,
+  reorderCrawlLocations,
   setAccessTokenGetter,
   syncAuthSession as syncAuthSessionApi,
+  toggleCrawlLocation,
+  toggleCrawlLocationChallenge,
   toggleChallenge,
+  uploadCrawlLocationImages,
+  uploadPostImages,
   votePost,
 } from './api'
-import { TrashIcon } from '@heroicons/react/24/outline'
+import { PlusIcon, TrashIcon } from '@heroicons/react/24/outline'
 import type { ComposerType, FeedPost, TripData, TripSummary } from './types'
 import AddressPicker from './components/AddressPicker'
+import LocationMiniMap from './components/LocationMiniMap'
 
 type AppView = 'setup' | 'dashboard'
+interface CrawlLocationDraft {
+  id: string
+  locationName: string
+  latitude: string
+  longitude: string
+}
 
 const STORAGE_TRIP_ID_KEY = 'tripplanner:active-trip-id:v1'
 const STORAGE_USER_ID_KEY = 'tripplanner:user-id:v1'
 const STORAGE_DISPLAY_NAME_KEY = 'tripplanner:display-name:v1'
 const STORAGE_USERNAME_KEY = 'tripplanner:username:v1'
 
-const POST_TYPES: ComposerType[] = ['SUGGESTION', 'EVENT']
+const POST_TYPES: ComposerType[] = ['SUGGESTION', 'EVENT', 'CRAWL']
 
 const DEFAULT_POST_BY_TYPE: Record<ComposerType, string> = {
   SUGGESTION: 'Suggestion',
   EVENT: 'Event',
+  CRAWL: 'Crawl',
 }
 
 const DAY_COUNT_MIN = 1
 const DAY_COUNT_MAX = 14
 const MAX_CHALLENGES_PER_POST = 3
+const MAX_CRAWL_LOCATIONS = 12
+const MAX_CHALLENGES_PER_CRAWL_LOCATION = 3
 const AUTH0_AUDIENCE = import.meta.env.VITE_AUTH0_AUDIENCE as string | undefined
 
 function makeId(): string {
   return crypto.randomUUID()
+}
+
+function createEmptyCrawlLocationDraft(): CrawlLocationDraft {
+  return {
+    id: makeId(),
+    locationName: '',
+    latitude: '',
+    longitude: '',
+  }
+}
+
+function CameraIcon({ className = 'h-4 w-4' }: { className?: string }) {
+  return (
+    <svg aria-hidden="true" className={className} fill="none" viewBox="0 0 24 24">
+      <path
+        d="M4 8.5C4 7.11929 5.11929 6 6.5 6H8.08579C8.61622 6 9.12493 5.78929 9.50079 5.41421L10.4142 4.50079C10.7893 4.12493 11.298 3.91421 11.8284 3.91421H12.1716C12.702 3.91421 13.2107 4.12493 13.5858 4.50079L14.4992 5.41421C14.8751 5.78929 15.3838 6 15.9142 6H17.5C18.8807 6 20 7.11929 20 8.5V17.5C20 18.8807 18.8807 20 17.5 20H6.5C5.11929 20 4 18.8807 4 17.5V8.5Z"
+        stroke="currentColor"
+        strokeWidth="1.5"
+      />
+      <circle cx="12" cy="13" r="3.25" stroke="currentColor" strokeWidth="1.5" />
+    </svg>
+  )
 }
 
 function formatDateTime(value: string): string {
@@ -245,6 +284,9 @@ export default function App() {
   const [composerFromTime, setComposerFromTime] = useState<string>('')
   const [composerToTime, setComposerToTime] = useState<string>('')
   const [composerLocation, setComposerLocation] = useState<string>('')
+  const [composerLatitude, setComposerLatitude] = useState<string>('')
+  const [composerLongitude, setComposerLongitude] = useState<string>('')
+  const [composerCrawlLocations, setComposerCrawlLocations] = useState<CrawlLocationDraft[]>(() => [createEmptyCrawlLocationDraft()])
   const [composerImages, setComposerImages] = useState<File[]>([])
   const [composerImageFieldVersion, setComposerImageFieldVersion] = useState<number>(0)
   const [composerError, setComposerError] = useState<string>('')
@@ -264,13 +306,34 @@ export default function App() {
   const [isCreatingChallenge, setIsCreatingChallenge] = useState<boolean>(false)
   const [togglingChallengeId, setTogglingChallengeId] = useState<string | null>(null)
   const [deletingChallengeId, setDeletingChallengeId] = useState<string | null>(null)
+  const [crawlChallengeTarget, setCrawlChallengeTarget] = useState<{ postId: string; locationId: string } | null>(null)
+  const [crawlChallengeDraft, setCrawlChallengeDraft] = useState<string>('')
+  const [crawlChallengeError, setCrawlChallengeError] = useState<string>('')
+  const [isCreatingCrawlChallenge, setIsCreatingCrawlChallenge] = useState<boolean>(false)
+  const [togglingCrawlChallengeId, setTogglingCrawlChallengeId] = useState<string | null>(null)
+  const [deletingCrawlChallengeId, setDeletingCrawlChallengeId] = useState<string | null>(null)
+  const [pendingCrawlChallengeDelete, setPendingCrawlChallengeDelete] = useState<{
+    postId: string
+    locationId: string
+    challengeId: string
+    challengeText: string
+  } | null>(null)
+  const [draggingCrawlLocation, setDraggingCrawlLocation] = useState<{ postId: string; locationId: string } | null>(null)
+  const [reorderingCrawlPostId, setReorderingCrawlPostId] = useState<string | null>(null)
+  const [togglingCrawlLocationId, setTogglingCrawlLocationId] = useState<string | null>(null)
+  const [uploadingPostImagesId, setUploadingPostImagesId] = useState<string | null>(null)
+  const [uploadingCrawlLocationImagesId, setUploadingCrawlLocationImagesId] = useState<string | null>(null)
   const composerFileInputRef = useRef<HTMLInputElement | null>(null)
+  const postImageInputRefs = useRef<Record<string, HTMLInputElement | null>>({})
+  const crawlLocationImageInputRefs = useRef<Record<string, HTMLInputElement | null>>({})
 
   const entryModal = useOverlayState({ defaultOpen: true })
   const postDeleteModal = useOverlayState({ defaultOpen: false })
   const tripDeleteModal = useOverlayState({ defaultOpen: false })
   const challengeModal = useOverlayState({ defaultOpen: false })
   const challengeDeleteModal = useOverlayState({ defaultOpen: false })
+  const crawlChallengeModal = useOverlayState({ defaultOpen: false })
+  const crawlChallengeDeleteModal = useOverlayState({ defaultOpen: false })
 
   const dayEntries = useMemo(() => {
     if (!trip) {
@@ -610,6 +673,36 @@ export default function App() {
     }
   }
 
+  function updateComposerCrawlLocation(index: number, updater: (current: CrawlLocationDraft) => CrawlLocationDraft) {
+    setComposerCrawlLocations((current) => {
+      if (index < 0 || index >= current.length) {
+        return current
+      }
+
+      return current.map((location, locationIndex) => (locationIndex === index ? updater(location) : location))
+    })
+  }
+
+  function addComposerCrawlLocation() {
+    setComposerCrawlLocations((current) => {
+      if (current.length >= MAX_CRAWL_LOCATIONS) {
+        return current
+      }
+
+      return [...current, createEmptyCrawlLocationDraft()]
+    })
+  }
+
+  function removeComposerCrawlLocation(index: number) {
+    setComposerCrawlLocations((current) => {
+      if (current.length <= 1) {
+        return current
+      }
+
+      return current.filter((_, locationIndex) => locationIndex !== index)
+    })
+  }
+
   function resetComposer() {
     setComposerTitle('')
     setComposerBody('')
@@ -617,6 +710,9 @@ export default function App() {
     setComposerFromTime('')
     setComposerToTime('')
     setComposerLocation('')
+    setComposerLatitude('')
+    setComposerLongitude('')
+    setComposerCrawlLocations([createEmptyCrawlLocationDraft()])
     setComposerImages([])
     setComposerImageFieldVersion((current) => current + 1)
     setComposerError('')
@@ -630,6 +726,13 @@ export default function App() {
     const trimmedDisplayName = displayName.trim()
     const trimmedTitle = composerTitle.trim()
     const trimmedBody = composerBody.trim()
+    const normalizedCrawlLocations = composerCrawlLocations
+      .map((location) => ({
+        locationName: location.locationName.trim(),
+        latitude: location.latitude,
+        longitude: location.longitude,
+      }))
+      .filter((location) => location.locationName.length > 0)
 
     if (composerType === 'SUGGESTION' && !trimmedTitle && !trimmedBody && composerImages.length === 0) {
       setComposerError('Add at least a title or a note for your suggestion.')
@@ -646,6 +749,33 @@ export default function App() {
 
       if (composerFromTime >= composerToTime) {
         setComposerError('Event end time must be after start time.')
+        return
+      }
+    }
+
+    if (composerType === 'CRAWL') {
+      if (!trimmedTitle) {
+        setComposerError('Crawl posts need a title.')
+        return
+      }
+
+      if (!composerFromTime || !composerToTime) {
+        setComposerError('Crawl posts need both start and end time.')
+        return
+      }
+
+      if (composerFromTime >= composerToTime) {
+        setComposerError('Crawl end time must be after start time.')
+        return
+      }
+
+      if (normalizedCrawlLocations.length === 0) {
+        setComposerError('Add at least one crawl location.')
+        return
+      }
+
+      if (normalizedCrawlLocations.length > MAX_CRAWL_LOCATIONS) {
+        setComposerError(`Crawl posts can include up to ${MAX_CRAWL_LOCATIONS} locations.`)
         return
       }
     }
@@ -685,12 +815,13 @@ export default function App() {
         postType: composerType,
         title: trimmedTitle || DEFAULT_POST_BY_TYPE[composerType],
         body: trimmedBody,
-        eventName: composerEventName.trim(),
+        eventName: composerType === 'EVENT' ? composerEventName.trim() : '',
         fromTime: composerFromTime,
         toTime: composerToTime,
-        locationName: composerLocation.trim(),
-        latitude: '',
-        longitude: '',
+        locationName: composerType === 'CRAWL' ? '' : composerLocation.trim(),
+        latitude: composerType === 'CRAWL' ? '' : composerLatitude,
+        longitude: composerType === 'CRAWL' ? '' : composerLongitude,
+        crawlLocations: composerType === 'CRAWL' ? normalizedCrawlLocations : [],
         images: composerImages,
       })
 
@@ -956,6 +1087,379 @@ export default function App() {
       setGlobalError(getErrorMessage(error))
     } finally {
       setDeletingChallengeId(null)
+    }
+  }
+
+  function replacePostInTrip(updatedPost: FeedPost) {
+    setTrip((current) => {
+      if (!current) {
+        return null
+      }
+
+      return {
+        ...current,
+        posts: current.posts.map((post) => (post.id === updatedPost.id ? updatedPost : post)),
+      }
+    })
+  }
+
+  async function uploadImagesToPost(postId: string, files: File[]) {
+    if (files.length === 0) {
+      return
+    }
+
+    if (files.length > 6) {
+      setGlobalError('You can upload up to 6 images at a time.')
+      return
+    }
+
+    const oversizedImage = files.find((image) => image.size > 8 * 1024 * 1024)
+
+    if (oversizedImage) {
+      setGlobalError(`"${oversizedImage.name}" is larger than 8MB.`)
+      return
+    }
+
+    try {
+      setUploadingPostImagesId(postId)
+      const updatedPost = await uploadPostImages(postId, files)
+      replacePostInTrip(updatedPost)
+    } catch (error) {
+      setGlobalError(getErrorMessage(error))
+    } finally {
+      setUploadingPostImagesId(null)
+
+      const input = postImageInputRefs.current[postId]
+
+      if (input) {
+        input.value = ''
+      }
+    }
+  }
+
+  async function uploadImagesToCrawlLocation(postId: string, locationId: string, files: File[]) {
+    if (files.length === 0) {
+      return
+    }
+
+    if (files.length > 6) {
+      setGlobalError('You can upload up to 6 images at a time.')
+      return
+    }
+
+    const oversizedImage = files.find((image) => image.size > 8 * 1024 * 1024)
+
+    if (oversizedImage) {
+      setGlobalError(`"${oversizedImage.name}" is larger than 8MB.`)
+      return
+    }
+
+    try {
+      setUploadingCrawlLocationImagesId(locationId)
+      const updatedPost = await uploadCrawlLocationImages(postId, locationId, files)
+      replacePostInTrip(updatedPost)
+    } catch (error) {
+      setGlobalError(getErrorMessage(error))
+    } finally {
+      setUploadingCrawlLocationImagesId(null)
+
+      const input = crawlLocationImageInputRefs.current[locationId]
+
+      if (input) {
+        input.value = ''
+      }
+    }
+  }
+
+  async function toggleCrawlLocationCompletion(postId: string, locationId: string) {
+    try {
+      setTogglingCrawlLocationId(locationId)
+      const updatedPost = await toggleCrawlLocation(postId, locationId)
+      replacePostInTrip(updatedPost)
+    } catch (error) {
+      setGlobalError(getErrorMessage(error))
+    } finally {
+      setTogglingCrawlLocationId(null)
+    }
+  }
+
+  async function reorderCrawlLocationInPost(postId: string, sourceLocationId: string, targetLocationId: string) {
+    if (sourceLocationId === targetLocationId) {
+      return
+    }
+
+    const currentPost = trip?.posts.find((post) => post.id === postId)
+
+    if (!currentPost || currentPost.postType !== 'CRAWL') {
+      return
+    }
+
+    const sourceIndex = currentPost.crawlLocations.findIndex((location) => location.id === sourceLocationId)
+    const targetIndex = currentPost.crawlLocations.findIndex((location) => location.id === targetLocationId)
+
+    if (sourceIndex < 0 || targetIndex < 0) {
+      return
+    }
+
+    const originalLocations = currentPost.crawlLocations
+    const reorderedLocations = [...originalLocations]
+    const [moved] = reorderedLocations.splice(sourceIndex, 1)
+    reorderedLocations.splice(targetIndex, 0, moved)
+
+    const normalizedLocations = reorderedLocations.map((location, index) => ({
+      ...location,
+      sortOrder: index,
+    }))
+
+    setTrip((current) => {
+      if (!current) {
+        return null
+      }
+
+      return {
+        ...current,
+        posts: current.posts.map((post) =>
+          post.id === postId
+            ? {
+                ...post,
+                crawlLocations: normalizedLocations,
+              }
+            : post,
+        ),
+      }
+    })
+
+    try {
+      setReorderingCrawlPostId(postId)
+      const updatedPost = await reorderCrawlLocations(
+        postId,
+        normalizedLocations.map((location) => location.id),
+      )
+      replacePostInTrip(updatedPost)
+    } catch (error) {
+      setGlobalError(getErrorMessage(error))
+      setTrip((current) => {
+        if (!current) {
+          return null
+        }
+
+        return {
+          ...current,
+          posts: current.posts.map((post) =>
+            post.id === postId
+              ? {
+                  ...post,
+                  crawlLocations: originalLocations,
+                }
+              : post,
+          ),
+        }
+      })
+    } finally {
+      setReorderingCrawlPostId(null)
+    }
+  }
+
+  function openCrawlChallengeModal(postId: string, locationId: string) {
+    const existingChallenges =
+      trip?.posts
+        .find((post) => post.id === postId)
+        ?.crawlLocations.find((location) => location.id === locationId)
+        ?.challenges ?? []
+
+    if (existingChallenges.length >= MAX_CHALLENGES_PER_CRAWL_LOCATION) {
+      setGlobalError(`Each crawl location can only have ${MAX_CHALLENGES_PER_CRAWL_LOCATION} challenges.`)
+      return
+    }
+
+    setCrawlChallengeTarget({ postId, locationId })
+    setCrawlChallengeDraft('')
+    setCrawlChallengeError('')
+    crawlChallengeModal.open()
+  }
+
+  function closeCrawlChallengeModal() {
+    setCrawlChallengeTarget(null)
+    setCrawlChallengeDraft('')
+    setCrawlChallengeError('')
+    crawlChallengeModal.close()
+  }
+
+  async function addChallengeToCrawlLocation() {
+    if (!crawlChallengeTarget) {
+      return
+    }
+
+    const trimmedChallenge = crawlChallengeDraft.trim()
+
+    if (!trimmedChallenge) {
+      setCrawlChallengeError('Challenge text is required.')
+      return
+    }
+
+    const existingChallenges =
+      trip?.posts
+        .find((post) => post.id === crawlChallengeTarget.postId)
+        ?.crawlLocations.find((location) => location.id === crawlChallengeTarget.locationId)
+        ?.challenges ?? []
+
+    if (existingChallenges.length >= MAX_CHALLENGES_PER_CRAWL_LOCATION) {
+      setCrawlChallengeError(
+        `You can only add up to ${MAX_CHALLENGES_PER_CRAWL_LOCATION} challenges on each crawl location.`,
+      )
+      return
+    }
+
+    try {
+      setIsCreatingCrawlChallenge(true)
+      setCrawlChallengeError('')
+
+      const challenge = await createCrawlLocationChallenge(
+        crawlChallengeTarget.postId,
+        crawlChallengeTarget.locationId,
+        {
+          displayName: displayName.trim(),
+          challengeText: trimmedChallenge,
+        },
+      )
+
+      setTrip((current) => {
+        if (!current) {
+          return null
+        }
+
+        return {
+          ...current,
+          posts: current.posts.map((post) => {
+            if (post.id !== crawlChallengeTarget.postId) {
+              return post
+            }
+
+            return {
+              ...post,
+              crawlLocations: post.crawlLocations.map((location) =>
+                location.id === crawlChallengeTarget.locationId
+                  ? {
+                      ...location,
+                      challenges: [...location.challenges, challenge],
+                    }
+                  : location,
+              ),
+            }
+          }),
+        }
+      })
+
+      closeCrawlChallengeModal()
+    } catch (error) {
+      setCrawlChallengeError(getErrorMessage(error))
+    } finally {
+      setIsCreatingCrawlChallenge(false)
+    }
+  }
+
+  async function toggleCrawlChallengeCompletion(postId: string, locationId: string, challengeId: string) {
+    try {
+      setTogglingCrawlChallengeId(challengeId)
+      const updatedChallenge = await toggleCrawlLocationChallenge(postId, locationId, challengeId)
+
+      setTrip((current) => {
+        if (!current) {
+          return null
+        }
+
+        return {
+          ...current,
+          posts: current.posts.map((post) => {
+            if (post.id !== postId) {
+              return post
+            }
+
+            return {
+              ...post,
+              crawlLocations: post.crawlLocations.map((location) =>
+                location.id === locationId
+                  ? {
+                      ...location,
+                      challenges: location.challenges.map((challenge) =>
+                        challenge.id === challengeId ? updatedChallenge : challenge,
+                      ),
+                    }
+                  : location,
+              ),
+            }
+          }),
+        }
+      })
+    } catch (error) {
+      setGlobalError(getErrorMessage(error))
+    } finally {
+      setTogglingCrawlChallengeId(null)
+    }
+  }
+
+  function openCrawlChallengeDeleteModal(postId: string, locationId: string, challengeId: string, challengeText: string) {
+    setPendingCrawlChallengeDelete({ postId, locationId, challengeId, challengeText })
+    crawlChallengeDeleteModal.open()
+  }
+
+  function closeCrawlChallengeDeleteModal() {
+    if (deletingCrawlChallengeId) {
+      return
+    }
+
+    setPendingCrawlChallengeDelete(null)
+    crawlChallengeDeleteModal.close()
+  }
+
+  async function confirmDeleteCrawlChallenge() {
+    if (!pendingCrawlChallengeDelete) {
+      return
+    }
+
+    try {
+      setDeletingCrawlChallengeId(pendingCrawlChallengeDelete.challengeId)
+      await deleteCrawlLocationChallenge(
+        pendingCrawlChallengeDelete.postId,
+        pendingCrawlChallengeDelete.locationId,
+        pendingCrawlChallengeDelete.challengeId,
+      )
+
+      setTrip((current) => {
+        if (!current) {
+          return null
+        }
+
+        return {
+          ...current,
+          posts: current.posts.map((post) => {
+            if (post.id !== pendingCrawlChallengeDelete.postId) {
+              return post
+            }
+
+            return {
+              ...post,
+              crawlLocations: post.crawlLocations.map((location) =>
+                location.id === pendingCrawlChallengeDelete.locationId
+                  ? {
+                      ...location,
+                      challenges: location.challenges.filter(
+                        (challenge) => challenge.id !== pendingCrawlChallengeDelete.challengeId,
+                      ),
+                    }
+                  : location,
+              ),
+            }
+          }),
+        }
+      })
+
+      setPendingCrawlChallengeDelete(null)
+      crawlChallengeDeleteModal.close()
+    } catch (error) {
+      setGlobalError(getErrorMessage(error))
+    } finally {
+      setDeletingCrawlChallengeId(null)
     }
   }
 
@@ -1236,8 +1740,13 @@ export default function App() {
                         New Trip
                       </Button>
                       <Button className={'w-full'} onPress={() => entryModal.open()}>Trip Options</Button>
-                      <Button  className="bg-danger w-full text-danger-foreground" onPress={() => tripDeleteModal.open()}>
-                        Delete Trip
+                      <Button
+                        aria-label="Delete trip"
+                        isIconOnly
+                        className="bg-danger text-danger-foreground"
+                        onPress={() => tripDeleteModal.open()}
+                      >
+                        <TrashIcon className="h-5 w-5" />
                       </Button>
                     </div>
                   </Card.Content>
@@ -1250,10 +1759,7 @@ export default function App() {
                         <Tabs.List aria-label="Trip days">
                           {dayEntries.map((day) => (
                             <Tabs.Tab id={`day-${day.dayNumber}`} key={`day-tab-${day.dayNumber}`}>
-                              <div className="flex flex-col items-center gap-0.5 leading-tight">
-                                <span>Day {day.dayNumber}</span>
-                                {day.tripDate && <span className="text-[11px] text-muted">{formatDateLabel(day.tripDate)}</span>}
-                              </div>
+                              {day.tripDate ? `Day ${day.dayNumber} - ${formatDateLabel(day.tripDate)}` : `Day ${day.dayNumber}`}
                             </Tabs.Tab>
                           ))}
                         </Tabs.List>
@@ -1302,6 +1808,15 @@ export default function App() {
                               />
                             )}
 
+                            {composerType === 'CRAWL' && (
+                              <Input
+                                className={'border border-gray-300'}
+                                placeholder="Crawl title"
+                                value={composerTitle}
+                                onChange={(event) => setComposerTitle(event.target.value)}
+                              />
+                            )}
+
                             {composerType === 'EVENT' && (
                               <Input className={'border border-gray-300'}
                                 placeholder="Event name"
@@ -1310,7 +1825,7 @@ export default function App() {
                               />
                             )}
 
-                            {(composerType === 'EVENT' || composerType === 'SUGGESTION') && (
+                            {(composerType === 'EVENT' || composerType === 'SUGGESTION' || composerType === 'CRAWL') && (
                               <div className="grid grid-cols-2 gap-2">
                                 <Input
                                   type="time"
@@ -1325,11 +1840,75 @@ export default function App() {
                               </div>
                             )}
 
-                            <AddressPicker
-                              placeholder="Location (optional)"
-                              value={composerLocation}
-                              onChange={setComposerLocation}
-                            />
+                            {composerType !== 'CRAWL' && (
+                              <AddressPicker
+                                placeholder="Location (optional)"
+                                value={composerLocation}
+                                onChange={(nextValue) => {
+                                  setComposerLocation(nextValue)
+                                  setComposerLatitude('')
+                                  setComposerLongitude('')
+                                }}
+                                onSelect={({ address, lat, lng }) => {
+                                  setComposerLocation(address)
+                                  setComposerLatitude(lat == null ? '' : lat.toFixed(6))
+                                  setComposerLongitude(lng == null ? '' : lng.toFixed(6))
+                                }}
+                              />
+                            )}
+
+                            {composerType === 'CRAWL' && (
+                              <div className="space-y-2 rounded-lg border border-border/70 bg-surface px-3 py-3">
+                                <div className="flex items-center justify-between">
+                                  <p className="text-sm font-medium">Crawl Locations ({composerCrawlLocations.length}/{MAX_CRAWL_LOCATIONS})</p>
+                                  <Button
+                                    isIconOnly
+                                    size="sm"
+                                    isDisabled={composerCrawlLocations.length >= MAX_CRAWL_LOCATIONS}
+                                    onPress={addComposerCrawlLocation}
+                                  >
+                                    <PlusIcon className="h-4 w-4" />
+                                  </Button>
+                                </div>
+                                <div className="space-y-3">
+                                  {composerCrawlLocations.map((location, index) => (
+                                    <div
+                                      key={location.id}
+                                      className="space-y-2 rounded-md border border-border/60 bg-surface-secondary/50 px-2 py-2"
+                                    >
+                                      <div className="flex items-center justify-between gap-2">
+                                        <span className="text-xs uppercase tracking-[0.08em] text-muted">Stop {index + 1}</span>
+                                        {composerCrawlLocations.length > 1 && (
+                                          <Button isIconOnly size="sm" onPress={() => removeComposerCrawlLocation(index)}>
+                                            x
+                                          </Button>
+                                        )}
+                                      </div>
+                                      <AddressPicker
+                                        placeholder={index === 0 ? 'Primary location' : 'Additional location'}
+                                        value={location.locationName}
+                                        onChange={(nextValue) =>
+                                          updateComposerCrawlLocation(index, (current) => ({
+                                            ...current,
+                                            locationName: nextValue,
+                                            latitude: '',
+                                            longitude: '',
+                                          }))
+                                        }
+                                        onSelect={({ address, lat, lng }) =>
+                                          updateComposerCrawlLocation(index, (current) => ({
+                                            ...current,
+                                            locationName: address,
+                                            latitude: lat == null ? '' : lat.toFixed(6),
+                                            longitude: lng == null ? '' : lng.toFixed(6),
+                                          }))
+                                        }
+                                      />
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
 
                             <div className="space-y-2">
                               <input
@@ -1344,28 +1923,17 @@ export default function App() {
                                   setComposerImages(files)
                                 }}
                               />
-                              <button
-                                className="flex w-full items-center justify-between rounded-2xl border border-border/70 bg-transparent px-4 py-3 text-left transition-colors hover:bg-surface-secondary/30"
-                                type="button"
-                                onClick={() => composerFileInputRef.current?.click()}
-                              >
-                                <div>
-                                  <p className="text-sm font-medium">Velg filer</p>
-                                  <p className="text-xs text-muted">Upload photos to this post (max 6)</p>
-                                </div>
-                                <svg aria-hidden="true" className="h-7 w-7 text-muted" fill="none" viewBox="0 0 24 24">
-                                  <rect x="3" y="3" width="18" height="18" rx="3" stroke="currentColor" strokeWidth="1.5" />
-                                  <circle cx="16.5" cy="8" r="1.5" fill="currentColor" />
-                                  <path d="M6 17L10 13L13 16L18 11L18 17H6Z" fill="currentColor" />
-                                  <path
-                                    d="M7.5 10.5V6.5M7.5 6.5L6 8M7.5 6.5L9 8"
-                                    stroke="currentColor"
-                                    strokeLinecap="round"
-                                    strokeLinejoin="round"
-                                    strokeWidth="1.5"
-                                  />
-                                </svg>
-                              </button>
+                              <div className="flex items-center justify-between rounded-2xl border border-border/70 bg-transparent px-4 py-3">
+                                <p className="text-xs text-muted">Upload photos to this post (max 6)</p>
+                                <Button
+                                  aria-label="Upload photos to this post"
+                                  isIconOnly
+                                  size="sm"
+                                  onPress={() => composerFileInputRef.current?.click()}
+                                >
+                                  <CameraIcon />
+                                </Button>
+                              </div>
                               {composerImages.length > 0 && (
                                 <p className="text-xs text-muted">
                                   {composerImages.length} image{composerImages.length === 1 ? '' : 's'} selected.
@@ -1408,7 +1976,7 @@ export default function App() {
                           <Card.Content className="pb-8 ">
                             {postsForSelectedDay.length === 0 ? (
                               <div className="rounded-xl border border-dashed border-border p-6 text-center text-muted">
-                                No posts yet for Day {dayEntry.dayNumber}. Start with a suggestion or event.
+                                No posts yet for Day {dayEntry.dayNumber}. Start with a suggestion, event, or crawl.
                               </div>
                             ) : (
                               <ScrollShadow className="max-h-[70vh] space-y-3 pr-0.5 pl-0.5 pb-8 pt-2">
@@ -1423,102 +1991,385 @@ export default function App() {
                                         </Card.Description>
                                       </div>
                                       <div className="flex items-center flex-col md:flex-row gap-2">
-
+                                        <input
+                                          ref={(node) => {
+                                            if (node) {
+                                              postImageInputRefs.current[post.id] = node
+                                            } else {
+                                              delete postImageInputRefs.current[post.id]
+                                            }
+                                          }}
+                                          className="hidden"
+                                          type="file"
+                                          accept="image/*"
+                                          multiple
+                                          onChange={(event) => {
+                                            const files = event.target.files ? Array.from(event.target.files) : []
+                                            void uploadImagesToPost(post.id, files)
+                                          }}
+                                        />
+                                        <Button
+                                          aria-label="Add photos to this post"
+                                          isIconOnly
+                                          size="sm"
+                                          isDisabled={uploadingPostImagesId === post.id}
+                                          onPress={() => postImageInputRefs.current[post.id]?.click()}
+                                        >
+                                          {uploadingPostImagesId === post.id ? (
+                                            <span className="text-[10px] font-semibold uppercase tracking-[0.06em]">...</span>
+                                          ) : (
+                                            <CameraIcon />
+                                          )}
+                                        </Button>
 
                                         {post.authorUserId.toLowerCase() === userId.toLowerCase() && (
                                           <Button
+                                            aria-label="Delete post"
+                                            isIconOnly
                                             className="bg-danger text-danger-foreground"
                                             size="sm"
                                             onPress={() => openPostDeleteModal(post.id, post.title)}
                                           >
-                                            Delete
+                                            <TrashIcon className="h-5 w-5" />
                                           </Button>
                                         )}
                                       </div>
                                     </Card.Header>
 
                                     <Card.Content className="space-y-2 ">
-                                      {(post.eventName || post.fromTime || post.toTime) && (
-                                        <div className="rounded-lg border border-border/70 bg-surface px-2 py-2 text-sm">
-                                          {post.eventName && <span className="font-medium">{post.eventName}</span>}
+                                      {post.postType === 'CRAWL' ? (
+                                        <>
                                           {(post.fromTime || post.toTime) && (
-                                            <div className="text-muted">
-                                              {post.fromTime || '--:--'} to {post.toTime || '--:--'}
+                                            <div className="rounded-lg border border-border/70 bg-surface px-2 py-2 text-sm">
+                                              <span className="font-medium">Crawl Window</span>
+                                              <div className="text-muted">
+                                                {post.fromTime || '--:--'} to {post.toTime || '--:--'}
+                                              </div>
                                             </div>
                                           )}
-                                        </div>
-                                      )}
 
-                                      {post.locationName && (
-                                        <div className="rounded-lg border border-border/70 bg-surface px-3 py-2 text-sm">
-                                          <span className="font-medium">Location: </span>
-                                          {post.locationName}
-                                        </div>
-                                      )}
+                                          <div className="space-y-2 rounded-lg border border-border/70 bg-surface px-3 py-2">
+                                            <div className="flex items-center justify-between gap-2">
+                                              <p className="text-xs font-semibold uppercase tracking-[0.08em] text-muted">
+                                                Crawl Stops ({post.crawlLocations.length}/{MAX_CRAWL_LOCATIONS})
+                                              </p>
+                                              {reorderingCrawlPostId === post.id && (
+                                                <span className="text-xs text-muted">Saving order...</span>
+                                              )}
+                                            </div>
 
-                                      <div className="space-y-2 rounded-lg border border-yellow-300/80 bg-yellow-50/75 px-3 py-2 text-sm">
-                                        <div className="flex items-center justify-between gap-2">
-                                          <p className="text-xs font-semibold uppercase tracking-[0.08em] text-yellow-900">
-                                            Challenges ({post.challenges.length}/{MAX_CHALLENGES_PER_POST})
-                                          </p>
-                                          <Button
-                                            size="sm"
-                                            isDisabled={post.challenges.length >= MAX_CHALLENGES_PER_POST}
-                                            onPress={() => openChallengeModal(post.id)}
-                                          >
-                                            Add Challenge
-                                          </Button>
-                                        </div>
+                                            {post.crawlLocations.length === 0 ? (
+                                              <p className="text-sm text-muted">No crawl locations yet.</p>
+                                            ) : (
+                                              <div className="space-y-2">
+                                                {post.crawlLocations.map((crawlLocation) => (
+                                                  <div
+                                                    key={crawlLocation.id}
+                                                    className={
+                                                      draggingCrawlLocation?.locationId === crawlLocation.id
+                                                        ? 'rounded-md border border-accent bg-accent/10 px-2.5 py-2'
+                                                        : 'rounded-md border border-border/70 bg-surface-secondary/60 px-2.5 py-2'
+                                                    }
+                                                    draggable={post.crawlLocations.length > 1}
+                                                    onDragStart={() =>
+                                                      setDraggingCrawlLocation({
+                                                        postId: post.id,
+                                                        locationId: crawlLocation.id,
+                                                      })
+                                                    }
+                                                    onDragOver={(event) => {
+                                                      if (
+                                                        draggingCrawlLocation &&
+                                                        draggingCrawlLocation.postId === post.id &&
+                                                        draggingCrawlLocation.locationId !== crawlLocation.id
+                                                      ) {
+                                                        event.preventDefault()
+                                                      }
+                                                    }}
+                                                    onDrop={(event) => {
+                                                      event.preventDefault()
 
-                                        {post.challenges.length === 0 ? (
-                                          <p className="text-xs text-yellow-900/80">No challenges yet.</p>
-                                        ) : (
-                                          <div className="space-y-2">
-                                            {post.challenges.map((challenge) => (
-                                              <div
-                                                key={challenge.id}
-                                                className="flex items-start justify-between gap-2 rounded-md border border-yellow-300 bg-yellow-100/80 px-2.5 py-2"
-                                              >
-                                                <div className="flex min-w-0 items-start gap-2">
-                                                  
-                                                  <input
-                                                    className="mt-0.5"
-                                                    type="checkbox"
-                                                    checked={challenge.isCompleted}
-                                                    disabled={togglingChallengeId === challenge.id || deletingChallengeId === challenge.id}
-                                                    onChange={() => toggleChallengeCompletion(post.id, challenge.id)}
-                                                  />
-                                                  <div className="min-w-0">
-                                                    <p className={challenge.isCompleted ? 'text-sm text-yellow-950/70 line-through' : 'text-sm text-yellow-950'}>
-                                                      <span className="font-semibold">{challenge.authorName}:</span> {challenge.challengeText}
-                                                    </p>
-                                                    {challenge.taggedDisplayName && (
-                                                      <p className="text-sm  text-black">@ <span className='-ml-0.5 font-medium text-yellow-900'>{challenge.taggedDisplayName}</span></p>
+                                                      if (
+                                                        !draggingCrawlLocation ||
+                                                        draggingCrawlLocation.postId !== post.id ||
+                                                        draggingCrawlLocation.locationId === crawlLocation.id
+                                                      ) {
+                                                        return
+                                                      }
+
+                                                      void reorderCrawlLocationInPost(
+                                                        post.id,
+                                                        draggingCrawlLocation.locationId,
+                                                        crawlLocation.id,
+                                                      )
+                                                      setDraggingCrawlLocation(null)
+                                                    }}
+                                                    onDragEnd={() => setDraggingCrawlLocation(null)}
+                                                  >
+                                                    <div className="flex items-start justify-between gap-2">
+                                                      <div className="flex min-w-0 items-start gap-2">
+                                                        <input
+                                                          className="mt-0.5"
+                                                          type="checkbox"
+                                                          checked={crawlLocation.isCompleted}
+                                                          disabled={
+                                                            togglingCrawlLocationId === crawlLocation.id ||
+                                                            reorderingCrawlPostId === post.id
+                                                          }
+                                                          onChange={() => toggleCrawlLocationCompletion(post.id, crawlLocation.id)}
+                                                        />
+                                                        <div className="min-w-0">
+                                                          <p
+                                                            className={
+                                                              crawlLocation.isCompleted
+                                                                ? 'text-sm text-foreground/70 line-through'
+                                                                : 'text-sm font-medium'
+                                                            }
+                                                          >
+                                                            {crawlLocation.sortOrder + 1}. {crawlLocation.locationName}
+                                                          </p>
+                                                        </div>
+                                                      </div>
+                                                      <span className="text-[10px] uppercase tracking-[0.08em] text-muted">Drag</span>
+                                                    </div>
+
+                                                    <input
+                                                      ref={(node) => {
+                                                        if (node) {
+                                                          crawlLocationImageInputRefs.current[crawlLocation.id] = node
+                                                        } else {
+                                                          delete crawlLocationImageInputRefs.current[crawlLocation.id]
+                                                        }
+                                                      }}
+                                                      className="hidden"
+                                                      type="file"
+                                                      accept="image/*"
+                                                      multiple
+                                                      onChange={(event) => {
+                                                        const files = event.target.files ? Array.from(event.target.files) : []
+                                                        void uploadImagesToCrawlLocation(post.id, crawlLocation.id, files)
+                                                      }}
+                                                    />
+                                                    <div className="mt-2 flex justify-end">
+                                                      <Button
+                                                        aria-label="Add photos to this crawl stop"
+                                                        isIconOnly
+                                                        size="sm"
+                                                        isDisabled={uploadingCrawlLocationImagesId === crawlLocation.id}
+                                                        onPress={() => crawlLocationImageInputRefs.current[crawlLocation.id]?.click()}
+                                                      >
+                                                        {uploadingCrawlLocationImagesId === crawlLocation.id ? (
+                                                          <span className="text-[10px] font-semibold uppercase tracking-[0.06em]">...</span>
+                                                        ) : (
+                                                          <CameraIcon />
+                                                        )}
+                                                      </Button>
+                                                    </div>
+
+                                                    <LocationMiniMap latitude={crawlLocation.latitude} longitude={crawlLocation.longitude} />
+
+                                                    {crawlLocation.images.length > 0 && (
+                                                      <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-3">
+                                                        {crawlLocation.images.map((imageUrl, imageIndex) => (
+                                                          <a
+                                                            key={`${crawlLocation.id}-image-${imageIndex}`}
+                                                            className="block overflow-hidden rounded-lg border border-border/70"
+                                                            href={imageUrl}
+                                                            rel="noreferrer"
+                                                            style={{ aspectRatio: '4 / 3' }}
+                                                            target="_blank"
+                                                          >
+                                                            <img
+                                                              alt={`Crawl stop image ${imageIndex + 1}`}
+                                                              className="h-full w-full object-cover"
+                                                              src={imageUrl}
+                                                            />
+                                                          </a>
+                                                        ))}
+                                                      </div>
                                                     )}
-                                                    {challenge.isCompleted && challenge.completedByDisplayName && (
-                                                      <p className="text-sm text-yellow-900/80">
-                                                        Checked by {challenge.completedByDisplayName}
-                                                      </p>
+
+                                                    <div className="mt-2 space-y-2 rounded-md border border-yellow-300/70 bg-yellow-50/60 px-2 py-2">
+                                                      <div className="flex items-center justify-between gap-2">
+                                                        <p className="text-xs font-semibold uppercase tracking-[0.08em] text-yellow-900">
+                                                          Challenges ({crawlLocation.challenges.length}/{MAX_CHALLENGES_PER_CRAWL_LOCATION})
+                                                        </p>
+                                                        <Button
+                                                          aria-label="Add challenge to this crawl stop"
+                                                          isIconOnly
+                                                          size="sm"
+                                                          className={'bg-transparent text-success'}
+                                                          isDisabled={
+                                                            crawlLocation.challenges.length >=
+                                                            MAX_CHALLENGES_PER_CRAWL_LOCATION
+                                                          }
+                                                          onPress={() => openCrawlChallengeModal(post.id, crawlLocation.id)}
+                                                        >
+                                                          <PlusIcon className="h-5 w-5" />
+                                                        </Button>
+                                                      </div>
+
+                                                      {crawlLocation.challenges.length === 0 ? (
+                                                        <p className="text-xs text-yellow-900/80">No challenges yet.</p>
+                                                      ) : (
+                                                        <div className="space-y-2">
+                                                          {crawlLocation.challenges.map((challenge) => (
+                                                            <div
+                                                              key={challenge.id}
+                                                              className="flex items-start justify-between gap-2 rounded-md border border-yellow-300 bg-yellow-100/80 px-2.5 py-2"
+                                                            >
+                                                              <div className="flex min-w-0 items-start gap-2">
+                                                                <input
+                                                                  className="mt-0.5"
+                                                                  type="checkbox"
+                                                                  checked={challenge.isCompleted}
+                                                                  disabled={
+                                                                    togglingCrawlChallengeId === challenge.id ||
+                                                                    deletingCrawlChallengeId === challenge.id
+                                                                  }
+                                                                  onChange={() =>
+                                                                    toggleCrawlChallengeCompletion(
+                                                                      post.id,
+                                                                      crawlLocation.id,
+                                                                      challenge.id,
+                                                                    )
+                                                                  }
+                                                                />
+                                                                <div className="min-w-0">
+                                                                  <p
+                                                                    className={
+                                                                      challenge.isCompleted
+                                                                        ? 'text-sm text-yellow-950/70 line-through'
+                                                                        : 'text-sm text-yellow-950'
+                                                                    }
+                                                                  >
+                                                                    <span className="font-semibold">{challenge.authorName}:</span>{' '}
+                                                                    {challenge.challengeText}
+                                                                  </p>
+                                                                  {challenge.isCompleted && challenge.completedByDisplayName && (
+                                                                    <p className="text-sm text-yellow-900/80">
+                                                                      Checked by {challenge.completedByDisplayName}
+                                                                    </p>
+                                                                  )}
+                                                                </div>
+                                                              </div>
+                                                              {challenge.authorUserId.toLowerCase() === userId.toLowerCase() && (
+                                                                <Button
+                                                                  aria-label="Delete crawl challenge"
+                                                                  isIconOnly
+                                                                  className="my-auto bg-transparent text-danger transition duration-75 focus:scale-90"
+                                                                  isDisabled={
+                                                                    deletingCrawlChallengeId === challenge.id ||
+                                                                    togglingCrawlChallengeId === challenge.id
+                                                                  }
+                                                                  size="md"
+                                                                  onPress={() =>
+                                                                    openCrawlChallengeDeleteModal(
+                                                                      post.id,
+                                                                      crawlLocation.id,
+                                                                      challenge.id,
+                                                                      challenge.challengeText,
+                                                                    )
+                                                                  }
+                                                                >
+                                                                  <TrashIcon className="h-5 w-5" />
+                                                                </Button>
+                                                              )}
+                                                            </div>
+                                                          ))}
+                                                        </div>
+                                                      )}
+                                                    </div>
+                                                  </div>
+                                                ))}
+                                              </div>
+                                            )}
+                                          </div>
+                                        </>
+                                      ) : (
+                                        <>
+                                          {(post.eventName || post.fromTime || post.toTime) && (
+                                            <div className="rounded-lg border border-border/70 bg-surface px-2 py-2 text-sm">
+                                              {post.eventName && <span className="font-medium">{post.eventName}</span>}
+                                              {(post.fromTime || post.toTime) && (
+                                                <div className="text-muted">
+                                                  {post.fromTime || '--:--'} to {post.toTime || '--:--'}
+                                                </div>
+                                              )}
+                                            </div>
+                                          )}
+
+                                          {post.locationName && (
+                                            <div className="rounded-lg border border-border/70 bg-surface px-3 py-2 text-sm">
+                                              <span className="font-medium">Location: </span>
+                                              {post.locationName}
+                                            </div>
+                                          )}
+
+                                          <div className="space-y-2 rounded-lg border border-yellow-300/80 bg-yellow-50/75 px-3 py-2 text-sm">
+                                            <div className="flex items-center justify-between gap-2">
+                                              <p className="text-xs font-semibold uppercase tracking-[0.08em] text-yellow-900">
+                                                Challenges ({post.challenges.length}/{MAX_CHALLENGES_PER_POST})
+                                              </p>
+                                              <Button
+                                                size="sm"
+                                                isDisabled={post.challenges.length >= MAX_CHALLENGES_PER_POST}
+                                                onPress={() => openChallengeModal(post.id)}
+                                              >
+                                                Add Challenge
+                                              </Button>
+                                            </div>
+
+                                            {post.challenges.length === 0 ? (
+                                              <p className="text-xs text-yellow-900/80">No challenges yet.</p>
+                                            ) : (
+                                              <div className="space-y-2">
+                                                {post.challenges.map((challenge) => (
+                                                  <div
+                                                    key={challenge.id}
+                                                    className="flex items-start justify-between gap-2 rounded-md border border-yellow-300 bg-yellow-100/80 px-2.5 py-2"
+                                                  >
+                                                    <div className="flex min-w-0 items-start gap-2">
+                                                      <input
+                                                        className="mt-0.5"
+                                                        type="checkbox"
+                                                        checked={challenge.isCompleted}
+                                                        disabled={togglingChallengeId === challenge.id || deletingChallengeId === challenge.id}
+                                                        onChange={() => toggleChallengeCompletion(post.id, challenge.id)}
+                                                      />
+                                                      <div className="min-w-0">
+                                                        <p className={challenge.isCompleted ? 'text-sm text-yellow-950/70 line-through' : 'text-sm text-yellow-950'}>
+                                                          <span className="font-semibold">{challenge.authorName}:</span> {challenge.challengeText}
+                                                        </p>
+                                                        {challenge.taggedDisplayName && (
+                                                          <p className="text-sm  text-black">@ <span className='-ml-0.5 font-medium text-yellow-900'>{challenge.taggedDisplayName}</span></p>
+                                                        )}
+                                                        {challenge.isCompleted && challenge.completedByDisplayName && (
+                                                          <p className="text-sm text-yellow-900/80">
+                                                            Checked by {challenge.completedByDisplayName}
+                                                          </p>
+                                                        )}
+                                                      </div>
+                                                    </div>
+                                                    {challenge.authorUserId.toLowerCase() === userId.toLowerCase() && (
+                                                      <Button
+                                                        aria-label="Delete challenge"
+                                                        isIconOnly
+                                                        className="bg-transparent my-auto focus:scale-90 duration-75 transition text-danger"
+                                                        isDisabled={deletingChallengeId === challenge.id || togglingChallengeId === challenge.id}
+                                                        size="md"
+                                                        onPress={() => openChallengeDeleteModal(post.id, challenge.id, challenge.challengeText)}
+                                                      >
+                                                        <TrashIcon className='h-5 w-5' />
+                                                      </Button>
                                                     )}
                                                   </div>
-                                                </div>
-                                                {challenge.authorUserId.toLowerCase() === userId.toLowerCase() && (
-                                                  <Button
-                                                    aria-label="Delete challenge"
-                                                    isIconOnly
-                                                    className="bg-transparent my-auto focus:scale-90 duration-75 transition text-danger"
-                                                    isDisabled={deletingChallengeId === challenge.id || togglingChallengeId === challenge.id}
-                                                    size="md"
-                                                    onPress={() => openChallengeDeleteModal(post.id, challenge.id, challenge.challengeText)}
-                                                  >
-                                                    <TrashIcon className='h-5 w-5' />
-                                                  </Button>
-                                                )}
+                                                ))}
                                               </div>
-                                            ))}
+                                            )}
                                           </div>
-                                        )}
-                                      </div>
+                                        </>
+                                      )}
 
                                       {post.body && <p className="text-sm leading-6">{post.body}</p>}
 
@@ -1631,8 +2482,8 @@ export default function App() {
       </main>
 
       <Modal.Root state={entryModal}>
-        <Modal.Trigger className="sr-only">
-          <span>Open trip options</span>
+        <Modal.Trigger>
+          <button className="sr-only" type="button">Open trip options</button>
         </Modal.Trigger>
 
         <Modal.Backdrop isDismissable={false}>
@@ -1731,8 +2582,8 @@ export default function App() {
       </Modal.Root>
 
       <Modal.Root state={challengeModal}>
-        <Modal.Trigger className="sr-only">
-          <span>Add challenge</span>
+        <Modal.Trigger>
+          <button className="sr-only" type="button">Add challenge</button>
         </Modal.Trigger>
 
         <Modal.Backdrop isDismissable>
@@ -1798,8 +2649,8 @@ export default function App() {
       </Modal.Root>
 
       <Modal.Root state={challengeDeleteModal}>
-        <Modal.Trigger className="sr-only">
-          <span>Confirm challenge deletion</span>
+        <Modal.Trigger>
+          <button className="sr-only" type="button">Confirm challenge deletion</button>
         </Modal.Trigger>
 
         <Modal.Backdrop isDismissable={!deletingChallengeId}>
@@ -1836,9 +2687,112 @@ export default function App() {
         </Modal.Backdrop>
       </Modal.Root>
 
+      <Modal.Root state={crawlChallengeModal}>
+        <Modal.Trigger>
+          <button className="sr-only" type="button">Add crawl challenge</button>
+        </Modal.Trigger>
+
+        <Modal.Backdrop isDismissable={!isCreatingCrawlChallenge}>
+          <Modal.Container placement="center">
+            <Modal.Dialog>
+              <Modal.Header>
+                <Modal.Heading>Add Crawl Challenge</Modal.Heading>
+                <Modal.CloseTrigger isDisabled={isCreatingCrawlChallenge} />
+              </Modal.Header>
+
+              <Modal.Body className="space-y-3 px-2">
+                <p className="text-sm text-muted">
+                  Add a challenge for this crawl stop. Max {MAX_CHALLENGES_PER_CRAWL_LOCATION} challenges per location.
+                </p>
+
+                <TextArea
+                  className="w-full"
+                  placeholder="Write a challenge for this location"
+                  value={crawlChallengeDraft}
+                  onChange={(event) => setCrawlChallengeDraft(event.target.value)}
+                  rows={3}
+                />
+
+                <p className="text-xs text-muted">
+                  {(crawlChallengeTarget
+                    ? (trip?.posts
+                        .find((post) => post.id === crawlChallengeTarget.postId)
+                        ?.crawlLocations.find((location) => location.id === crawlChallengeTarget.locationId)
+                        ?.challenges.length ?? 0)
+                    : 0)}/{MAX_CHALLENGES_PER_CRAWL_LOCATION} used on this location
+                </p>
+
+                {crawlChallengeError && <p className="text-sm text-danger">{crawlChallengeError}</p>}
+              </Modal.Body>
+
+              <Modal.Footer className="flex justify-end gap-2">
+                <Button isDisabled={isCreatingCrawlChallenge} onPress={closeCrawlChallengeModal}>
+                  Cancel
+                </Button>
+                <Button
+                  className="bg-accent text-accent-foreground"
+                  isDisabled={
+                    !crawlChallengeTarget
+                    || isCreatingCrawlChallenge
+                    || (crawlChallengeTarget
+                      ? (trip?.posts
+                          .find((post) => post.id === crawlChallengeTarget.postId)
+                          ?.crawlLocations.find((location) => location.id === crawlChallengeTarget.locationId)
+                          ?.challenges.length ?? 0) >= MAX_CHALLENGES_PER_CRAWL_LOCATION
+                      : false)
+                  }
+                  onPress={addChallengeToCrawlLocation}
+                >
+                  {isCreatingCrawlChallenge ? 'Adding...' : 'Add Challenge'}
+                </Button>
+              </Modal.Footer>
+            </Modal.Dialog>
+          </Modal.Container>
+        </Modal.Backdrop>
+      </Modal.Root>
+
+      <Modal.Root state={crawlChallengeDeleteModal}>
+        <Modal.Trigger>
+          <button className="sr-only" type="button">Confirm crawl challenge deletion</button>
+        </Modal.Trigger>
+
+        <Modal.Backdrop isDismissable={!deletingCrawlChallengeId}>
+          <Modal.Container placement="center">
+            <Modal.Dialog>
+              <Modal.Header>
+                <Modal.Heading>Delete Crawl Challenge?</Modal.Heading>
+                <Modal.CloseTrigger isDisabled={Boolean(deletingCrawlChallengeId)} />
+              </Modal.Header>
+
+              <Modal.Body>
+                <p className="text-sm text-muted">
+                  {pendingCrawlChallengeDelete
+                    ? `Are you sure you want to delete "${pendingCrawlChallengeDelete.challengeText}"?`
+                    : 'Are you sure you want to delete this challenge?'}
+                </p>
+                <p className="mt-2 text-sm text-muted">This action cannot be undone.</p>
+              </Modal.Body>
+
+              <Modal.Footer className="flex justify-end gap-2">
+                <Button isDisabled={Boolean(deletingCrawlChallengeId)} onPress={closeCrawlChallengeDeleteModal}>
+                  Cancel
+                </Button>
+                <Button
+                  className="bg-danger text-danger-foreground"
+                  isDisabled={!pendingCrawlChallengeDelete || Boolean(deletingCrawlChallengeId)}
+                  onPress={confirmDeleteCrawlChallenge}
+                >
+                  {deletingCrawlChallengeId ? 'Deleting...' : 'Delete Challenge'}
+                </Button>
+              </Modal.Footer>
+            </Modal.Dialog>
+          </Modal.Container>
+        </Modal.Backdrop>
+      </Modal.Root>
+
       <Modal.Root state={postDeleteModal}>
-        <Modal.Trigger className="sr-only">
-          <span>Confirm post deletion</span>
+        <Modal.Trigger>
+          <button className="sr-only" type="button">Confirm post deletion</button>
         </Modal.Trigger>
 
         <Modal.Backdrop isDismissable={!isDeletingPost}>
@@ -1872,8 +2826,8 @@ export default function App() {
       </Modal.Root>
 
       <Modal.Root state={tripDeleteModal}>
-        <Modal.Trigger className="sr-only">
-          <span>Confirm trip deletion</span>
+        <Modal.Trigger>
+          <button className="sr-only" type="button">Confirm trip deletion</button>
         </Modal.Trigger>
 
         <Modal.Backdrop isDismissable={!isDeletingTrip}>
