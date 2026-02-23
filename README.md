@@ -27,6 +27,7 @@ VITE_API_BASE_URL=http://localhost:3001
 ```
 
 `DATABASE_URL` is used by Prisma for both CLI and runtime API access.
+For direct/hosted Postgres URLs (not `prisma://`), include `schema=app` in the connection string query parameters.
 The API supports:
 - `postgres://...` and `postgresql://...` via Prisma Postgres adapter.
 - `prisma://...` and `prisma+postgres://...` via Prisma Accelerate.
@@ -134,7 +135,9 @@ pm2 logs tripplanner-web
 
 - `GET /api/health`
 - `GET /api/trips/:tripId`
+- `GET /api/trips/:tripId/messages`
 - `POST /api/trips`
 - `POST /api/trips/join`
+- `POST /api/trips/:tripId/messages`
 - `POST /api/trips/:tripId/posts`
 - `POST /api/posts/:postId/comments`

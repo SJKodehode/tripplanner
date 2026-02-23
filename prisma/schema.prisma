@@ -33,6 +33,7 @@ model User {
   lastSeenAt   DateTime?     @map("last_seen_at") @db.Timestamptz(0)
   createdTrips Trip[]        @relation("TripsCreatedBy")
   tripMembers  TripMember[]
+  tripMessages TripMessage[] @relation("TripMessagesAuthor")
   feedPosts    FeedPost[]    @relation("FeedPostsAuthor")
   feedComments FeedComment[] @relation("FeedCommentsAuthor")
   postVotes    PostVote[]
@@ -60,6 +61,7 @@ model Trip {
   createdByUser    User         @relation("TripsCreatedBy", fields: [createdByUserId], references: [userId], map: "fk_trips_created_by_user")
   tripMembers      TripMember[]
   tripDays         TripDay[]
+  tripMessages     TripMessage[]
   feedPosts        FeedPost[]
 
   @@map("trips")
@@ -93,6 +95,21 @@ model TripDay {
 
   @@unique([tripId, dayNumber], map: "uq_trip_days_trip_id_day_number")
   @@map("trip_days")
+  @@schema("app")
+}
+
+model TripMessage {
+  tripMessageId String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid @map("trip_message_id")
+  tripId        String   @map("trip_id") @db.Uuid
+  authorUserId  String   @map("author_user_id") @db.Uuid
+  messageBody   String   @map("message_body") @db.VarChar(2000)
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(0)
+  trip          Trip     @relation(fields: [tripId], references: [tripId], onDelete: Cascade, map: "fk_trip_messages_trip")
+  author        User     @relation("TripMessagesAuthor", fields: [authorUserId], references: [userId], map: "fk_trip_messages_author")
+
+  @@index([tripId, createdAt(sort: Desc)], map: "ix_trip_messages_trip_id_created_at")
+  @@index([authorUserId, createdAt(sort: Desc)], map: "ix_trip_messages_author_user_id_created_at")
+  @@map("trip_messages")
   @@schema("app")
 }
 

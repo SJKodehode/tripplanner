@@ -33,6 +33,9 @@ const maxChallengesPerPost = 3
 const maxCrawlLocationsPerPost = 12
 const maxChallengesPerCrawlLocation = 3
 const maxCrawlLocationImageCount = 6
+const defaultTripMessagePageSize = 50
+const maxTripMessagePageSize = 200
+const maxTripMessageLength = 2000
 
 function createPrismaResources(rawDatabaseUrl) {
   const trimmed = (rawDatabaseUrl ?? '').trim()
@@ -528,6 +531,48 @@ function normalizeChallengeText(value) {
   return trimmed.slice(0, 500)
 }
 
+function normalizeTripMessageBody(value) {
+  const trimmed = toTrimmedString(value)
+
+  if (!trimmed) {
+    throw new ApiError(400, 'Message body is required.')
+  }
+
+  return trimmed.slice(0, maxTripMessageLength)
+}
+
+function normalizeTripMessageLimit(value) {
+  const trimmed = toTrimmedString(value)
+
+  if (!trimmed) {
+    return defaultTripMessagePageSize
+  }
+
+  const parsed = Number(trimmed)
+
+  if (!Number.isInteger(parsed) || parsed < 1 || parsed > maxTripMessagePageSize) {
+    throw new ApiError(400, `Limit must be between 1 and ${maxTripMessagePageSize}.`)
+  }
+
+  return parsed
+}
+
+function normalizeTripMessageBefore(value) {
+  const trimmed = toTrimmedString(value)
+
+  if (!trimmed) {
+    return null
+  }
+
+  const parsed = new Date(trimmed)
+
+  if (Number.isNaN(parsed.valueOf())) {
+    throw new ApiError(400, 'before must be a valid ISO datetime.')
+  }
+
+  return parsed
+}
+
 function normalizeOptionalUserId(value) {
   const trimmed = toTrimmedString(value)
   return trimmed || null
@@ -825,6 +870,17 @@ function mapCommentRow(row) {
     id: row.feedCommentId,
     authorName: toTrimmedString(row.author?.displayName) || 'Traveler',
     commentBody: row.commentBody,
+    createdAt: serializeDate(row.createdAt),
+  }
+}
+
+function mapTripMessageRow(row) {
+  return {
+    id: row.tripMessageId,
+    tripId: row.tripId,
+    authorUserId: row.authorUserId,
+    authorName: toTrimmedString(row.author?.displayName) || 'Traveler',
+    messageBody: row.messageBody ?? '',
     createdAt: serializeDate(row.createdAt),
   }
 }
@@ -1220,6 +1276,27 @@ async function getCommentById(db, commentId) {
   return mapCommentRow(comment)
 }
 
+async function getTripMessageById(db, messageId) {
+  const message = await db.tripMessage.findFirst({
+    where: {
+      tripMessageId: messageId,
+    },
+    include: {
+      author: {
+        select: {
+          displayName: true,
+        },
+      },
+    },
+  })
+
+  if (!message) {
+    return null
+  }
+
+  return mapTripMessageRow(message)
+}
+
 async function getChallengeById(db, challengeId) {
   const challenge = await db.feedPostChallenge.findFirst({
     where: {
@@ -1379,6 +1456,97 @@ app.get('/api/trips/:tripId', async (req, res, next) => {
     }
 
     res.json({ trip })
+  } catch (error) {
+    next(error)
+  }
+})
+
+app.get('/api/trips/:tripId/messages', async (req, res, next) => {
+  try {
+    const db = await getDb()
+    const { userId } = await resolveAuthenticatedUser(db, req)
+    const tripId = req.params.tripId
+    const limit = normalizeTripMessageLimit(req.query.limit)
+    const before = normalizeTripMessageBefore(req.query.before)
+    const member = await isTripMember(db, tripId, userId)
+
+    if (!member) {
+      throw new ApiError(403, 'Join this trip before viewing messages.')
+    }
+
+    const rows = await db.tripMessage.findMany({
+      where: {
+        tripId,
+        ...(before ? { createdAt: { lt: before } } : {}),
+      },
+      orderBy: [
+        { createdAt: 'desc' },
+        { tripMessageId: 'desc' },
+      ],
+      take: limit + 1,
+      include: {
+        author: {
+          select: {
+            displayName: true,
+          },
+        },
+      },
+    })
+
+    const hasMore = rows.length > limit
+    const pageRows = hasMore ? rows.slice(0, limit) : rows
+    const messages = pageRows.reverse().map(mapTripMessageRow)
+
+    res.json({ messages, hasMore })
+  } catch (error) {
+    next(error)
+  }
+})
+
+app.post('/api/trips/:tripId/messages', async (req, res, next) => {
+  try {
+    const db = await getDb()
+    const tripId = req.params.tripId
+    const preferredDisplayName = toTrimmedString(req.body.displayName)
+    const { userId } = await resolveAuthenticatedUser(db, req, preferredDisplayName)
+    const member = await isTripMember(db, tripId, userId)
+
+    if (!member) {
+      throw new ApiError(403, 'Join this trip before sending messages.')
+    }
+
+    const messageBody = normalizeTripMessageBody(req.body.messageBody)
+    const messageId = await db.$transaction(async (tx) => {
+      const createdMessage = await tx.tripMessage.create({
+        data: {
+          tripId,
+          authorUserId: userId,
+          messageBody,
+        },
+        select: {
+          tripMessageId: true,
+        },
+      })
+
+      await tx.trip.update({
+        where: {
+          tripId,
+        },
+        data: {
+          updatedAt: new Date(),
+        },
+      })
+
+      return createdMessage.tripMessageId
+    })
+
+    const message = await getTripMessageById(db, messageId)
+
+    if (!message) {
+      throw new ApiError(500, 'Message was sent but could not be loaded.')
+    }
+
+    res.status(201).json({ message })
   } catch (error) {
     next(error)
   }
@@ -2602,6 +2770,7 @@ async function start() {
   await prisma.$queryRaw`SELECT 1`
 
   const requiredPrismaDelegates = [
+    'tripMessage',
     'postVote',
     'feedPostImage',
     'feedPostChallenge',
@@ -2622,6 +2791,7 @@ async function start() {
   }
 
   try {
+    await prisma.tripMessage.count()
     await prisma.postVote.count()
     await prisma.feedPostImage.count()
     await prisma.feedPostChallenge.count()
@@ -2631,7 +2801,7 @@ async function start() {
   } catch (error) {
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2021') {
       throw new Error(
-        'Missing tables for votes/images/challenges/crawl locations/crawl location images. Run Prisma migrations and restart the API.',
+        'Missing tables for trip messages/votes/images/challenges/crawl locations/crawl location images. Run Prisma migrations and restart the API.',
       )
     }
 
