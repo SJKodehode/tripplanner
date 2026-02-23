@@ -141,3 +141,7 @@ pm2 logs tripplanner-web
 - `POST /api/trips/:tripId/messages`
 - `POST /api/trips/:tripId/posts`
 - `POST /api/posts/:postId/comments`
+
+## Expo Integration
+
+- Group chat endpoint guide: `EXPO_GROUP_CHAT_INTEGRATION.md`
